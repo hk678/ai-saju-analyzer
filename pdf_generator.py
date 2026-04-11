@@ -12,9 +12,16 @@ Bug Fix:
   4. 신강신약 한자(身弱/身強) KR-Light 폰트 누락 → KR 폰트로 변경
   5. TSI subset 경고 무시 (fpdf2 내부 이슈, 기능에 영향 없음)
 
+[수정 사항 v5]
+  8. 고아 제목(orphan heading) 방지 강화:
+     - h1/h2/h3 _ensure_space 후행 보장치 48mm → 96mm 로 상향
+       (제목 뒤 최소 8줄 분량의 본문이 같은 페이지에 오도록 강제)
+     - bold_line도 뒤에 본문 48mm 보장 추가
+     - 이로써 "제목만 있고 내용은 다음 페이지" 현상 제거
+
 [수정 사항 v4 - 신규]
   6. 폰트 계층 구조 수정:
-     - h1/h2 (번호 달린 섹션 제목): 20pt Bold → 가장 큼
+     - h1/h2 (번호 달린 섹션 제목): 18pt Bold → 가장 큼
      - bold_line ([대괄호] 소제목): 17pt Bold → 섹션 제목보다 작고 본문보다 큼
      - bullet/text (본문): 16pt → 가장 작음
   7. 헤더 누락 페이지 수정:
@@ -137,7 +144,9 @@ class SajuPDF(FPDF):
 
     def __init__(self):
         super().__init__(orientation='P', unit='mm', format='A4')
-        self.set_auto_page_break(auto=True, margin=20)
+        # [수정 v5] auto page break 비활성화 — multi_cell 도중 헤더 없는 빈 페이지 생성 방지
+        # 대신 _render_markdown 에서 블록별로 필요 높이를 계산해 수동 페이지 넘김
+        self.set_auto_page_break(auto=False)
         self._register_fonts()
         self.set_margins(0, 0, 0)
         self._page_num_enabled = False
@@ -194,11 +203,17 @@ class SajuPDF(FPDF):
     def _render_markdown(self, text: str, x=20, width=170, line_h=12):
         """
         폰트 계층 (수정 v4):
-          h1/h2  : 번호 달린 섹션 제목 → 20pt Bold  (가장 큼)
+          h1/h2  : 번호 달린 섹션 제목 → 18pt Bold  (가장 큼)
           h3     : 소소제목              → 18pt Bold
           bold_line: [대괄호] 소제목   → 17pt Bold  (h1/h2보다 작고 본문보다 큼)
           bullet/text: 본문             → 16pt       (가장 작음)
+
+        [수정 v5] auto_page_break=False 이므로, 각 블록을 그리기 직전에
+        필요 높이를 추정하고 부족하면 _new_content_page() 를 호출한다.
+        이렇게 하면 multi_cell 도중 fpdf2 가 헤더 없는 빈 페이지를 만드는 문제가 사라진다.
         """
+        PAGE_BOTTOM = 275  # 여백을 고려한 실질 하단 (mm)
+
         blocks = parse_markdown_blocks(text)
         self.set_left_margin(x)
         self.set_right_margin(210 - x - width)
@@ -216,47 +231,63 @@ class SajuPDF(FPDF):
             self.set_left_margin(x)
             self.set_right_margin(210 - x - width)
 
-        for btype, content in blocks:
-            if self.get_y() > 258:
+        def _estimate_lines(content: str, chars_per_line: int = 30) -> int:
+            """텍스트가 몇 줄로 wrapping 될지 대략 추정"""
+            if not content:
+                return 1
+            return max(1, (len(content) // chars_per_line) + 1)
+
+        def _ensure_space(needed_mm: float):
+            """현재 Y 에서 needed_mm 만큼 공간이 없으면 새 페이지"""
+            if self.get_y() + needed_mm > PAGE_BOTTOM:
                 _new_content_page()
 
+        for btype, content in blocks:
+
             if btype == 'blank':
-                self.ln(5)
+                # blank 는 높이가 작으므로 여유 있을 때만 추가
+                if self.get_y() + 5 <= PAGE_BOTTOM:
+                    self.ln(5)
 
             elif btype == 'h1':
-                # [수정 v4] 번호 달린 섹션 제목: 20pt Bold → 가장 큼
+                lines = _estimate_lines(content, 25)
+                # 제목 높이 + 본문 최소 8줄(96mm) — 고아 제목 방지 (강화)
+                _ensure_space(6 + lines * 13 + 3 + 96)
                 self.ln(6)
-                self.set_font('KR', 'B', 200)
+                self.set_font('KR', 'B', 18)
                 self._text_color(C_CHARCOAL)
                 self.set_x(x)
-                self.multi_cell(width, 13, content, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(width, 13, content, align='L', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(3)
 
             elif btype == 'h2':
-                # [수정 v4] 번호 달린 섹션 제목: 20pt Bold → 가장 큼
+                lines = _estimate_lines(content, 25)
+                # 제목 높이 + 본문 최소 8줄(96mm) — 고아 제목 방지 (강화)
+                _ensure_space(5 + lines * 13 + 3 + 96)
                 self.ln(5)
                 self._fill(C_GOLD)
                 self.rect(x, self.get_y(), 5, 11, style='F')
-                self.set_font('KR', 'B', 200)
+                self.set_font('KR', 'B', 18)
                 self._text_color(C_CHARCOAL)
                 self.set_x(x + 10)
-                self.multi_cell(width - 10, 13, content, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(width - 10, 13, content, align='L', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(3)
 
             elif btype == 'h3':
-                # 소제목: 18pt
-                if self.get_y() > 240:   # 임계값 조절 (240~260 추천)
-                    self.add_page()
+                lines = _estimate_lines(content, 28)
+                # 제목 높이 + 본문 최소 8줄(96mm) — 고아 제목 방지 (강화)
+                _ensure_space(10 + lines * 10 + 2 + 96)
                 self.ln(10)
                 self.set_font('KR', 'B', 18)
                 self._text_color(C_ACCENT)
                 self.set_x(x)
-                self.multi_cell(width, 10, content, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(width, 10, content, align='L', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(2)
 
             elif btype == 'bold_line':
-                # [수정 v4] [대괄호] 소제목: 17pt Bold → h1/h2(20pt)보다 작고 본문(16pt)보다 큼
-                # self.ln(4)
+                lines = _estimate_lines(content, 28)
+                # bold_line도 뒤에 본문 최소 3줄 보장
+                _ensure_space(lines * 11 + 2 + 48)
                 self.set_font('KR', 'B', 17)
                 self._text_color(C_CHARCOAL)
                 self.set_x(x)
@@ -264,7 +295,8 @@ class SajuPDF(FPDF):
                 self.ln(2)
 
             elif btype == 'bullet':
-                # 본문 bullet: 16pt
+                lines = _estimate_lines(content, 28)
+                _ensure_space(lines * line_h + 1)
                 self.set_font('KR', '', 16)
                 self._text_color(C_TEXT_DARK)
                 self._fill(C_GOLD)
@@ -274,8 +306,9 @@ class SajuPDF(FPDF):
                                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(1)
 
-            else:
-                # 일반 본문: 16pt
+            else:  # text
+                lines = _estimate_lines(content, 28)
+                _ensure_space(lines * line_h)
                 self.set_font('KR', '', 16)
                 self._text_color(C_TEXT_DARK)
                 self.set_x(x)
@@ -438,7 +471,7 @@ class SajuPDF(FPDF):
         self._text_color(C_GOLD)
         self.set_xy(150, 10)
         self.cell(40, 8, '사주 분석', align='R')
-        self.set_y(36)
+        self.set_y(45)
 
     def _start_content_page(self, section_icon: str, section_title: str):
         self._current_section_icon  = section_icon
@@ -820,15 +853,16 @@ class SajuPDF(FPDF):
     # ══════════════════════════════════════════════════════════════════════════
     # 9. 월별 운세 (AI 분석 텍스트)
     # ══════════════════════════════════════════════════════════════════════════
-    def add_monthly_section(self, monthly: dict):
-        self._start_content_page('[월운]', '올해 월별 운세')
+    def add_monthly_section(self, monthly: dict, target_year: int = None):
+        year_str = f"{target_year}년 " if target_year else "올해 "
+        self._start_content_page('[월운]', f'{year_str}월별 운세')
         month_names = ['1월','2월','3월','4월','5월','6월',
                        '7월','8월','9월','10월','11월','12월']
 
         for month_key, content in monthly.items():
             mn = month_names[int(month_key) - 1]
             if self.get_y() > 255:
-                self._start_content_page('[월운]', '올해 월별 운세 (계속)')
+                self._start_content_page('[월운]', f'{year_str}월별 운세 (계속)')
 
             self._fill((240, 242, 248)); self._stroke(C_CARD_BORDER)
             self.set_line_width(0.3)
@@ -847,12 +881,14 @@ class SajuPDF(FPDF):
     # ══════════════════════════════════════════════════════════════════════════
     # 10. 올해 운세 / 요약
     # ══════════════════════════════════════════════════════════════════════════
-    def add_this_year_section(self, content: str):
-        self._start_content_page('[운세]', '올해 운세')
+    def add_this_year_section(self, content: str, target_year: int = None):
+        year_str = f"{target_year}년" if target_year else "올해"
+        self._start_content_page('[운세]', f'{year_str} 운세')
         self._render_markdown(content, x=20, width=170)
 
-    def add_summary_section(self, content: str):
-        self._start_content_page('[분석]', '분야별 운세 요약')
+    def add_summary_section(self, content: str, target_year: int = None):
+        year_str = f"{target_year}년 " if target_year else ""
+        self._start_content_page('[분석]', f'{year_str}분야별 운세 요약')
         self._render_markdown(content, x=20, width=170)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -929,10 +965,18 @@ class SajuPDF(FPDF):
 def generate_pdf(saju_data: dict, analysis: dict,
                  output_path: str,
                  chart_paths: dict = None,
-                 report_type: str = "premium") -> str:
+                 report_type: str = "premium",
+                 target_year: int = None) -> str:
 
     today = _today_str()
     pdf   = SajuPDF()
+
+    # target_year 미지정 시 세운 데이터에서 자동 추출
+    if target_year is None:
+        seun_list = saju_data.get("세운", [])
+        target_year = seun_list[0]["연도"] if seun_list else datetime.now().year
+
+    year_str = f"{target_year}년"
 
     section_configs = [
         ("personality",  "[성격]", "타고난 본질과 성격"),
@@ -944,27 +988,27 @@ def generate_pdf(saju_data: dict, analysis: dict,
     ]
 
     toc_entries = []
-    toc_entries.append(('[분석]', '사주 원국 및 기본 데이터'))
+    # toc_entries.append(('[분석]', '사주 원국 및 기본 데이터'))
 
-    has_seun  = bool(saju_data.get("세운"))
-    has_wolun = bool(saju_data.get("월운"))
-    if has_seun:
-        toc_entries.append(('[세운]', '세운(年運) 데이터'))
-    if has_wolun:
-        toc_entries.append(('[월운]', '월운(月運) 데이터'))
+    # has_seun  = bool(saju_data.get("세운"))
+    # has_wolun = bool(saju_data.get("월운"))
+    # if has_seun:
+    #     toc_entries.append(('[세운]', '세운(年運) 데이터'))
+    # if has_wolun:
+    #     toc_entries.append(('[월운]', '월운(月運) 데이터'))
 
     for key, icon, title in section_configs:
         if analysis.get(key):
             toc_entries.append((icon, title))
 
     if analysis.get("this_year"):
-        toc_entries.append(('[운세]', '올해 운세'))
+        toc_entries.append(('[운세]', f'{year_str} 운세'))
     if analysis.get("summary"):
-        toc_entries.append(('[분석]', '분야별 운세 요약'))
+        toc_entries.append(('[분석]', f'{year_str} 분야별 운세 요약'))
     if analysis.get("yearly"):
         toc_entries.append(('[운세]', '향후 10년 연간 운세'))
     if analysis.get("monthly"):
-        toc_entries.append(('[월운]', '올해 월별 운세'))
+        toc_entries.append(('[월운]', f'{year_str} 월별 운세'))
 
     toc_entries.append(('[마무리]', '맺음말'))
 
@@ -972,12 +1016,12 @@ def generate_pdf(saju_data: dict, analysis: dict,
     pdf.add_toc(toc_entries)
     pdf._page_num_enabled = True
 
-    pdf.add_saju_chart(saju_data)
+    # pdf.add_saju_chart(saju_data)
 
-    if has_seun:
-        pdf.add_seun_section(saju_data["세운"])
-    if has_wolun:
-        pdf.add_wolun_section(saju_data["월운"])
+    # if has_seun:
+    #     pdf.add_seun_section(saju_data["세운"])
+    # if has_wolun:
+    #     pdf.add_wolun_section(saju_data["월운"])
 
     for key, icon, title in section_configs:
         content = analysis.get(key, "")
@@ -985,13 +1029,13 @@ def generate_pdf(saju_data: dict, analysis: dict,
             pdf.add_analysis_section(icon, title, content)
 
     if analysis.get("this_year"):
-        pdf.add_this_year_section(analysis["this_year"])
+        pdf.add_this_year_section(analysis["this_year"], target_year)
     if analysis.get("summary"):
-        pdf.add_summary_section(analysis["summary"])
+        pdf.add_summary_section(analysis["summary"], target_year)
     if analysis.get("yearly"):
         pdf.add_yearly_section(analysis["yearly"])
     if analysis.get("monthly"):
-        pdf.add_monthly_section(analysis["monthly"])
+        pdf.add_monthly_section(analysis["monthly"], target_year)
 
     pdf.add_epilogue(saju_data['기본정보']['이름'], today)
 

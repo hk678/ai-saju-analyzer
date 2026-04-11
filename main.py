@@ -21,6 +21,7 @@ from saju_calculator import calculate_saju, get_seun, get_wolun
 from visualizer import draw_element_chart, draw_sipsung_chart, draw_daewun_flow
 from gemini_analyzer import generate_premium_report, generate_basic_report
 from pdf_generator import generate_pdf
+from word_generator import generate_word
 
 
 def get_user_input() -> dict:
@@ -36,6 +37,15 @@ def get_user_input() -> dict:
     gender = input("성별을 입력하세요 (남/여): ").strip() or "남"
     rtype  = input("리포트 유형 (basic/premium, 기본값 basic): ").strip() or "basic"
 
+    current_year = datetime.now().year
+    year_input = input(
+        f"운세 기준 연도 (엔터: {current_year}년 / 다른 연도 예: {current_year+1}): "
+    ).strip()
+    if year_input.isdigit() and 2000 <= int(year_input) <= 2100:
+        target_year = int(year_input)
+    else:
+        target_year = current_year
+
     try:
         y, m, d = map(int, birth.split("-"))
         h  = int(hour)
@@ -50,6 +60,7 @@ def get_user_input() -> dict:
         "hour": h, "minute": mi,
         "gender": gender,
         "report_type": rtype,
+        "target_year": target_year,
     }
 
 
@@ -60,24 +71,18 @@ def _attach_seun_wolun(saju_data: dict, target_year: int, seun_years: int = 10) 
     세운: target_year 부터 seun_years 개년치 리스트
     월운: target_year 의 12개월 리스트
 
-    각 항목은 _build_pillar_block 구조를 그대로 따른다:
-    {
-      "연도": 2026,
-      "간지": {"천간": "丙", "지지": "午"},
-      "천간": {"문자": "丙", "오행": "화", "십성": {...}},
-      "지지": {"문자": "午", "오행": "화", "십성": {...}, "12운성": "...", "신살": [...]}
-    }
-    월운은 "월" 키가 추가됨.
+    신살 계산 시 년지·일지 이중 기준 + 일간 기준 적용.
     """
     d_stem   = saju_data["일간정보"]["일간"]
     y_branch = saju_data["사주원국"]["연주"]["지지"]
+    d_branch = saju_data["사주원국"]["일주"]["지지"]
 
     saju_data["세운"] = [
-        get_seun(target_year + i, d_stem, y_branch)
+        get_seun(target_year + i, d_stem, y_branch, d_branch)
         for i in range(seun_years)
     ]
     saju_data["월운"] = [
-        get_wolun(target_year, m, d_stem, y_branch)
+        get_wolun(target_year, m, d_stem, y_branch, d_branch)
         for m in range(1, 13)
     ]
     return saju_data
@@ -102,7 +107,7 @@ def run_pipeline(user_info: dict, api_key: str):
     )
 
     # 세운 / 월운 계산 후 saju_data에 첨부
-    target_year = datetime.now().year
+    target_year = user_info.get("target_year", datetime.now().year)
     saju_data = _attach_seun_wolun(saju_data, target_year, seun_years=10)
 
     print(f"\n  ✅ 사주 원국: "
@@ -173,28 +178,35 @@ def run_pipeline(user_info: dict, api_key: str):
     with open(out_dir / "analysis.json", "w", encoding="utf-8") as f:
         json.dump(analysis, f, ensure_ascii=False, indent=2)
 
-    # ── Step 4: PDF 생성 ─────────────────────────────────────────────────────
-    print("\n📄 [4/4] PDF 리포트 조립 중...")
+    # ── Step 4: 문서 생성 ──────────────────────────────────────────────────
+    print("\n📄 [4/4] 문서 생성 중...")
+
+    # Word 생성
+    # word_path = str(out_dir / f"사주리포트_{user_info['name']}.docx")
+    # try:
+    #     generate_word(saju_data, analysis, word_path,
+    #                 user_info["report_type"], target_year)
+    # except Exception as e:
+    #     print(f"  ⚠️  Word 생성 오류: {e}")
+    #     import traceback; traceback.print_exc()
+    
+    # return str(out_dir), word_path
+
+    # PDF 생성
     pdf_path = str(out_dir / f"사주리포트_{user_info['name']}.pdf")
     try:
-        generate_pdf(saju_data, analysis, pdf_path, chart_paths, user_info["report_type"])
+        generate_pdf(saju_data, analysis, pdf_path, chart_paths,
+                    user_info["report_type"], target_year)
     except Exception as e:
-        print(f"  ⚠️  PDF 변환 오류: {e}")
+        print(f"  ⚠️  PDF 생성 오류: {e}")
         import traceback; traceback.print_exc()
-
-    print(f"\n{'='*60}")
-    print(f"✨ 완료! 출력 파일:")
-    for f in out_dir.iterdir():
-        size = f.stat().st_size // 1024
-        print(f"   📄 {f.name} ({size}KB)")
-    print(f"{'='*60}\n")
 
     return str(out_dir), pdf_path
 
 
-def regenerate_pdf_only(out_dir: str):
+def regenerate_docu_only(out_dir: str):
     out_dir = Path(out_dir)
-    print("\n🔁 PDF만 재생성 모드")
+    print("\n🔁 문서 재생성 모드")
 
     with open(out_dir / "saju_data.json", encoding="utf-8") as f:
         saju_data = json.load(f)
@@ -206,9 +218,23 @@ def regenerate_pdf_only(out_dir: str):
         "sipsung":  str(out_dir / "chart_sipsung.png"),
         "daewun":   str(out_dir / "chart_daewun.png"),
     }
-    pdf_path = str(out_dir / f"사주리포트_{saju_data['기본정보']['이름']}.pdf")
+    name = saju_data['기본정보']['이름']
+    seun_list   = saju_data.get("세운", [])
+    target_year = seun_list[0]["연도"] if seun_list else datetime.now().year
+
+    # Word 재생성
+    # word_path = str(out_dir / f"사주리포트_{name}.docx")
+    # try:
+    #     generate_word(saju_data, analysis, word_path, "basic", target_year)
+    #     print(f"✅ Word 재생성 완료: {word_path}")
+    # except Exception as e:
+    #     print(f"❌ Word 생성 실패: {e}")
+    #     import traceback; traceback.print_exc()
+
+    # PDF 재생성
+    pdf_path = str(out_dir / f"사주리포트_{name}.pdf")
     try:
-        generate_pdf(saju_data, analysis, pdf_path, chart_paths, "basic")
+        generate_pdf(saju_data, analysis, pdf_path, chart_paths, "basic", target_year)
         print(f"✅ PDF 재생성 완료: {pdf_path}")
     except Exception as e:
         print(f"❌ PDF 생성 실패: {e}")
@@ -254,12 +280,12 @@ if __name__ == "__main__":
 
     print("\n모드 선택:")
     print("  1: 전체 실행 (만세력 → AI 분석 → PDF)")
-    print("  2: PDF만 재생성 (기존 JSON 사용)")
+    print("  2: 문서만 재생성 (기존 JSON 사용)")
     mode = input("선택 (1/2): ").strip()
 
     if mode == "2":
         path = input("기존 output 폴더 경로 입력: ").strip()
-        regenerate_pdf_only(path)
+        regenerate_docu_only(path)
         exit()
 
     api_key = os.environ.get("GEMINI_API_KEY", "")

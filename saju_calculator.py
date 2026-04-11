@@ -99,13 +99,127 @@ TWELVE_STATE_TABLE = {
     "癸": ["卯","寅","丑","子","亥","戌","酉","申","未","午","巳","辰"],
 }
 
-_YEOKMA_MAP = {
-    "寅":"申","午":"申","戌":"申","申":"寅","子":"寅","辰":"寅",
-    "亥":"巳","卯":"巳","未":"巳","巳":"亥","酉":"亥","丑":"亥",
+# ── 12신살 + 주요신살 완전 테이블 ─────────────────────────────────────────────
+#
+# 12신살은 "삼합 그룹의 기준지지(년지 or 일지)"를 기반으로 계산한다.
+# 삼합 3그룹: 申子辰(수국), 寅午戌(화국), 巳酉丑(금국), 亥卯未(목국)
+# 각 그룹의 "중심지(장성지)"를 기준으로 12지지를 순환하면
+# 12개 신살 이름이 대응된다.
+#
+# 순서(장성 기준 +0 ~ +11):
+#   장성(+0) → 반안(+1) → 역마(+6 = 충) → 육해(+10) → 화개(+11=끝)
+#   겁살(-3=앞 그룹 끝) → 재살(-2) → 천살(-1) → 지살(+0-그룹시작) → 도화(+1) → 월살(+3) → 망신(+5)
+#
+# 구현은 "기준지지 → 12신살 위치 매핑" 딕셔너리로 단순화한다.
+#
+# key: 기준지지(년지 or 일지)
+# value: {지지문자: 신살이름}
+
+def _build_12shinsal_map() -> dict:
+    """
+    12신살 전체 매핑 테이블 생성.
+    반환: { 기준지지: { 대상지지: 신살이름 } }
+
+    삼합 4그룹 × 12신살 = 48 케이스 전체 커버.
+    """
+    # 4개 삼합 그룹 (시작, 중심[장성], 끝)
+    # 방향: 지지 순서대로 +1씩 (子=0, 丑=1, ... 亥=11)
+    # 겁살=중심-3, 재살=중심-2, 천살=중심-1,
+    # 지살=중심-3+1(시작글자), 도화=시작+1,
+    # 월살=중심+3, 망신=중심+5, 장성=중심+0,
+    # 반안=중심+1, 역마=중심+6(충), 육해=중심+10, 화개=중심+11
+    #
+    # 더 직관적으로: 삼합의 첫글자(지살)를 기준으로 +0~+11 매핑
+
+    # 삼합 그룹별 "지살(시작지지)" 인덱스
+    # 申子辰水局 → 지살=申(9), 장성=子(0→12로 환산하면 9+3=12%12=0), 화개=辰(3)
+    # 寅午戌火局 → 지살=寅(2), 장성=午(6), 화개=戌(10)
+    # 巳酉丑金局 → 지살=巳(5), 장성=酉(9→실제인덱스 8 아님, 酉=9), 화개=丑(1)
+    # 亥卯未木局 → 지살=亥(11), 장성=卯(3), 화개=未(7)
+    #
+    # 12신살 순서 (지살=+0 기준):
+    # +0:지살, +1:도화, +2:월살, +3:장성, +4:반안, +5:역마,
+    # +6:육해, +7:화개, +8:겁살, +9:재살, +10:천살, +11:망신
+    #
+    # ※ 국내 명리학 통설(삼합기준 12신살):
+    # 地殺(지살)=삼합시작, 桃花(도화)=시작+1, 月殺(월살)=시작+2,
+    # 將星(장성)=삼합중심, 攀鞍(반안)=중심+1, 驛馬(역마)=삼합끝(충),
+    # 六害(육해)=끝+1, 華蓋(화개)=끝+2,
+    # 劫殺(겁살)=이전삼합끝(충에서-1), 災殺(재살)=충, 天殺(천살)=충+1,
+    # 亡身(망신)=중심-1
+    #
+    # 가장 보편적으로 쓰이는 정리:
+    # 기준지지(년지/일지)가 속한 삼합 그룹 결정 후,
+    # 12지지를 그룹 시작지지부터 순환하며 이름 부여.
+    # 순서: 겁살,재살,천살,지살,도화,월살,망신,장성,반안,역마,육해,화개
+
+    # 삼합 그룹: 시작지지 인덱스 (겁살 위치 = 시작-1의 삼합끝 = 이전그룹 끝)
+    # 실제 순서 (겁살부터):
+    #   申子辰: 겁살=巳,재살=午,천살=未,지살=申,도화=酉,월살=戌,망신=亥,장성=子,반안=丑,역마=寅,육해=卯,화개=辰
+    #   寅午戌: 겁살=亥,재살=子,천살=丑,지살=寅,도화=卯,월살=辰,망신=巳,장성=午,반안=未,역마=申,육해=酉,화개=戌
+    #   巳酉丑: 겁살=寅,재살=卯,천살=辰,지살=巳,도화=午,월살=未,망신=申,장성=酉,반안=戌,역마=亥,육해=子,화개=丑
+    #   亥卯未: 겁살=申,재살=酉,천살=戌,지살=亥,도화=子,월살=丑,망신=寅,장성=卯,반안=辰,역마=巳,육해=午,화개=未
+
+    ORDER = ["겁살","재살","천살","지살","도화살","월살","망신살","장성살","반안살","역마살","육해살","화개살"]
+
+    # 4그룹 × (겁살 시작 지지 인덱스)
+    groups_start = {
+        # 기준 그룹(년지/일지)  : 겁살 시작 지지 인덱스
+        frozenset([9, 0, 3]):  5,   # 申(9)子(0)辰(3) → 겁살=巳(5)
+        frozenset([2, 6, 10]): 11,  # 寅(2)午(6)戌(10)→ 겁살=亥(11)
+        frozenset([5, 9, 1]):  2,   # 巳(5)酉(8→실제9)丑(1)→ 겁살=寅(2)
+        frozenset([11, 3, 7]): 9,   # 亥(11)卯(3)未(7)→ 겁살=申(9)
+    }
+    # 지지 인덱스 보정 (酉=8이 아니라 酉=9 — BRANCHES 기준)
+    # 子=0,丑=1,寅=2,卯=3,辰=4,巳=5,午=6,未=7,申=8,酉=9,戌=10,亥=11
+    groups_start_corrected = {
+        frozenset([8, 0, 4]):  5,   # 申(8)子(0)辰(4) → 겁살=巳(5)
+        frozenset([2, 6, 10]): 11,  # 寅(2)午(6)戌(10)→ 겁살=亥(11)
+        frozenset([5, 9, 1]):  2,   # 巳(5)酉(9)丑(1) → 겁살=寅(2)
+        frozenset([11, 3, 7]): 8,   # 亥(11)卯(3)未(7)→ 겁살=申(8)
+    }
+
+    result = {}
+    for group_set, start_idx in groups_start_corrected.items():
+        sal_map = {}
+        for offset, sal_name in enumerate(ORDER):
+            branch_idx = (start_idx + offset) % 12
+            sal_map[BRANCHES[branch_idx]] = sal_name
+        # 이 그룹에 속하는 모든 지지를 기준지지로 등록
+        for b_idx in group_set:
+            result[BRANCHES[b_idx]] = sal_map
+    return result
+
+_12SHINSAL_MAP = _build_12shinsal_map()
+
+# 천을귀인: 일간 기준 → 대상지지
+_CHUNEUL_MAP = {
+    "甲": ["丑","未"], "乙": ["子","申"],
+    "丙": ["亥","酉"], "丁": ["亥","酉"],
+    "戊": ["丑","未"], "己": ["子","申"],
+    "庚": ["丑","未"], "辛": ["寅","午"],
+    "壬": ["卯","巳"], "癸": ["卯","巳"],
 }
-_DOHWA_MAP = {
-    "寅":"卯","午":"卯","戌":"卯","申":"酉","子":"酉","辰":"酉",
-    "亥":"子","卯":"子","未":"子","巳":"午","酉":"午","丑":"午",
+
+# 문창귀인: 일간 기준 → 대상지지
+_MUNCHANG_MAP = {
+    "甲":"巳","乙":"午","丙":"申","丁":"酉",
+    "戊":"申","己":"酉","庚":"亥","辛":"子",
+    "壬":"寅","癸":"卯",
+}
+
+# 홍염살: 일간 기준 → 대상지지
+_HONGYEOM_MAP = {
+    "甲":"午","乙":"申","丙":"寅","丁":"未",
+    "戊":"辰","己":"辰","庚":"戌","辛":"戌",
+    "壬":"子","癸":"申",
+}
+
+# 학당귀인: 일간 기준 → 대상지지
+_HAKDANG_MAP = {
+    "甲":"亥","乙":"午","丙":"寅","丁":"酉",
+    "戊":"申","己":"卯","庚":"巳","辛":"子",
+    "壬":"申","癸":"卯",
 }
 
 
@@ -129,34 +243,89 @@ def _get_jeolgi_date(year: int, longitude: float, cal_month: int) -> date:
 
 # ── 공통 헬퍼 ─────────────────────────────────────────────────────────────────
 
-def _get_shinsal_for_branch(year_branch: str, target_branch: str) -> list:
-    """특정 지지의 신살 (원국 연지 기준). 대운/세운/월운 공통."""
+def _calc_12shinsal(base_branch: str, target_branch: str) -> list:
+    """
+    base_branch(년지 또는 일지) 기준으로 target_branch의 12신살 판별.
+    해당 없으면 빈 리스트 반환.
+    """
+    sal_map = _12SHINSAL_MAP.get(base_branch, {})
+    sal = sal_map.get(target_branch)
+    return [sal] if sal else []
+
+
+def _calc_stem_shinsal(day_stem: str, target_branch: str) -> list:
+    """
+    일간(day_stem) 기준으로 target_branch의 신살 판별.
+    천을귀인, 문창귀인, 홍염살, 학당귀인.
+    """
     result = []
-    if _YEOKMA_MAP.get(year_branch) == target_branch:
-        result.append("역마살")
-    if _DOHWA_MAP.get(year_branch) == target_branch:
-        result.append("도화살")
+    if target_branch in _CHUNEUL_MAP.get(day_stem, []):
+        result.append("천을귀인")
+    if _MUNCHANG_MAP.get(day_stem) == target_branch:
+        result.append("문창귀인")
+    if _HONGYEOM_MAP.get(day_stem) == target_branch:
+        result.append("홍염살")
+    if _HAKDANG_MAP.get(day_stem) == target_branch:
+        result.append("학당귀인")
     return result
 
 
+def _get_shinsal_for_branch(year_branch: str, target_branch: str,
+                             day_stem: str = "",
+                             day_branch: str = "") -> list:
+    """
+    대운/세운/월운 단일 지지의 신살 전체 계산.
+
+    계산 기준:
+      - 12신살: 년지 기준 + (일지 기준도 체크, 중복 제거)
+      - 천을귀인/문창귀인/홍염살/학당귀인: 일간 기준
+    """
+    result = []
+    seen = set()
+
+    def add(sal: str):
+        if sal not in seen:
+            seen.add(sal)
+            result.append(sal)
+
+    # 12신살 — 년지 기준
+    for sal in _calc_12shinsal(year_branch, target_branch):
+        add(sal)
+
+    # 12신살 — 일지 기준 (일지가 다를 때만 추가 체크)
+    if day_branch and day_branch != year_branch:
+        for sal in _calc_12shinsal(day_branch, target_branch):
+            add(sal)
+
+    # 일간 기준 신살
+    if day_stem:
+        for sal in _calc_stem_shinsal(day_stem, target_branch):
+            add(sal)
+
+    return result
+
+
+
 def _build_pillar_block(stem: str, branch: str,
-                        day_stem: str, year_branch: str) -> dict:
+                        day_stem: str, year_branch: str,
+                        day_branch: str = "") -> dict:
     """
     천간+지지 하나의 완전한 분석 블록.
     대운 / 세운 / 월운에서 공통 사용.
 
+    신살 계산:
+      - 12신살: 년지(year_branch) + 일지(day_branch) 이중 기준
+      - 일간 기반 신살: day_stem 기준
+
     반환 구조:
     {
       "간지": {"천간": "癸", "지지": "巳"},
-      "천간": {
-          "문자": "癸", "오행": "수",
-          "십성": {"값": "정재", "기준": "일간"}
-      },
+      "천간": {"문자": "癸", "오행": "수", "십성": {"값": "정재", "기준": "일간"}},
       "지지": {
           "문자": "巳", "오행": "화",
           "십성": {"값": "편인", "기준": "일간"},
           "12운성": "건록",
-          "신살": ["역마살"]
+          "신살": ["역마살", "천을귀인"]
       }
     }
     """
@@ -175,7 +344,7 @@ def _build_pillar_block(stem: str, branch: str,
                 "기준": "일간",
             },
             "12운성": get_twelve_state(day_stem, branch),
-            "신살":   _get_shinsal_for_branch(year_branch, branch),
+            "신살":   _get_shinsal_for_branch(year_branch, branch, day_stem, day_branch),
         },
     }
 
@@ -240,64 +409,84 @@ def get_twelve_state(stem: str, branch: str) -> str:
 
 def get_shinsal(year_branch: str, day_stem: str, day_branch: str,
                 all_branches: list) -> list:
+    """
+    원국(사주팔자) 전체 신살 계산.
+
+    포함:
+      - 12신살: 년지 기준 + 일지 기준 (all_branches 내 해당 지지 존재 여부)
+      - 천을귀인, 문창귀인, 홍염살, 학당귀인: 일간 기준
+      - 공망: 일주 기준
+
+    all_branches: 원국 4지지 리스트 [년지, 월지, 일지, 시지]
+    """
+    seen = set()
     result = []
-    if _YEOKMA_MAP.get(year_branch) in all_branches:
-        result.append("역마살")
-    if _DOHWA_MAP.get(year_branch) in all_branches:
-        result.append("도화살")
-    hakdang = {"甲":"亥","乙":"午","丙":"寅","丁":"酉","戊":"申",
-               "己":"卯","庚":"巳","辛":"子","壬":"申","癸":"卯"}
-    if hakdang.get(day_stem) in all_branches:
-        result.append("학당귀인")
-    chuneul = {"甲":["丑","未"],"乙":["子","申"],"丙":["亥","酉"],"丁":["亥","酉"],
-               "戊":["丑","未"],"己":["子","申"],"庚":["丑","未"],"辛":["寅","午"],
-               "壬":["卯","巳"],"癸":["卯","巳"]}
-    if any(b in all_branches for b in chuneul.get(day_stem, [])):
-        result.append("천을귀인")
-    # 공망
-    ds_idx  = STEMS.index(day_stem)
-    db_idx  = BRANCHES.index(day_branch)
-    g_idx   = ds_idx % 10 + (db_idx - ds_idx % 12 + 60) % 12
-    gm_list = [(( g_idx // 10) * 10 + 10) % 12, ((g_idx // 10) * 10 + 11) % 12]
-    if any(BRANCHES.index(b) in gm_list for b in all_branches):
-        result.append("공망")
-    return list(dict.fromkeys(result))
+
+    def add(sal: str):
+        if sal not in seen:
+            seen.add(sal)
+            result.append(sal)
+
+    # ── 12신살 (년지 기준) ──────────────────────────────────────────────────
+    y_sal_map = _12SHINSAL_MAP.get(year_branch, {})
+    for b in all_branches:
+        sal = y_sal_map.get(b)
+        if sal:
+            add(sal)
+
+    # ── 12신살 (일지 기준 — 년지와 다를 때만) ────────────────────────────
+    if day_branch != year_branch:
+        d_sal_map = _12SHINSAL_MAP.get(day_branch, {})
+        for b in all_branches:
+            sal = d_sal_map.get(b)
+            if sal:
+                add(sal)
+
+    # ── 일간 기준 신살 ────────────────────────────────────────────────────
+    for b in all_branches:
+        for sal in _calc_stem_shinsal(day_stem, b):
+            add(sal)
+
+    # ── 공망 (空亡) ────────────────────────────────────────────────────────
+    # 일주 육십갑자 순번에서 빠진 마지막 두 지지
+    ds_idx = STEMS.index(day_stem)
+    db_idx = BRANCHES.index(day_branch)
+    # 육십갑자 블록(10간 * 12지) 중 현재 블록의 시작 간지 인덱스
+    cycle_pos   = (ds_idx * 12 + db_idx) % 60   # 0~59
+    block_start = (cycle_pos // 10) * 10         # 블록 시작(0,10,20,30,40,50)
+    # 해당 블록에서 사용된 간지 수는 10개, 지지 시작 인덱스
+    ji_start    = (db_idx - ds_idx % 12 + 60) % 12
+    # 공망 지지 인덱스 (블록 내 마지막 두 지지)
+    gm_idxs = [(ji_start + 10) % 12, (ji_start + 11) % 12]
+    for b in all_branches:
+        if BRANCHES.index(b) in gm_idxs:
+            add("공망")
+            break
+
+    return result
 
 
 # ── 세운 / 월운 ───────────────────────────────────────────────────────────────
 
-def get_seun(target_year: int, day_stem: str, year_branch: str) -> dict:
+def get_seun(target_year: int, day_stem: str, year_branch: str,
+             day_branch: str = "") -> dict:
     """
     특정 연도의 세운(年運).
-
-    반환:
-    {
-      "연도": 2026,
-      "간지": {"천간": "丙", "지지": "午"},
-      "천간": {"문자": "丙", "오행": "화", "십성": {"값": "...", "기준": "일간"}},
-      "지지": {"문자": "午", "오행": "화", "십성": {...}, "12운성": "...", "신살": [...]}
-    }
+    day_branch: 원국 일지 (신살 이중 기준용)
     """
     stem, branch = get_year_pillar(target_year)
     return {
         "연도": target_year,
-        **_build_pillar_block(stem, branch, day_stem, year_branch),
+        **_build_pillar_block(stem, branch, day_stem, year_branch, day_branch),
     }
 
 
 def get_wolun(target_year: int, target_month: int,
-              day_stem: str, year_branch: str) -> dict:
+              day_stem: str, year_branch: str,
+              day_branch: str = "") -> dict:
     """
     특정 연도·월의 월운(月運). 오호둔법(五虎遁法) 사용.
-
-    반환:
-    {
-      "연도": 2026,
-      "월": 3,
-      "간지": {"천간": "壬", "지지": "寅"},
-      "천간": {"문자": "壬", "오행": "수", "십성": {...}},
-      "지지": {"문자": "寅", "오행": "목", "십성": {...}, "12운성": "...", "신살": [...]}
-    }
+    day_branch: 원국 일지 (신살 이중 기준용)
     """
     y_stem, _        = get_year_pillar(target_year)
     y_stem_idx       = STEMS.index(y_stem)
@@ -312,7 +501,7 @@ def get_wolun(target_year: int, target_month: int,
     return {
         "연도":  target_year,
         "월":    target_month,
-        **_build_pillar_block(stem, branch, day_stem, year_branch),
+        **_build_pillar_block(stem, branch, day_stem, year_branch, day_branch),
     }
 
 
@@ -412,7 +601,8 @@ def calculate_saju(name: str,
     for i in range(1, 11):
         s_idx = (m_si + i if forward else m_si - i + 100) % 10
         b_idx = (m_bi + i if forward else m_bi - i + 120) % 12
-        block = _build_pillar_block(STEMS[s_idx], BRANCHES[b_idx], d_stem, y_branch)
+        block = _build_pillar_block(STEMS[s_idx], BRANCHES[b_idx],
+                                    d_stem, y_branch, d_branch)
         daewun_list.append({
             "순서":    i,
             "시작나이": daewun_su + (i - 1) * 10,
