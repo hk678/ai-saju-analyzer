@@ -488,7 +488,8 @@ def get_wolun(target_year: int, target_month: int,
     특정 연도·월의 월운(月運). 오호둔법(五虎遁法) 사용.
     day_branch: 원국 일지 (신살 이중 기준용)
     """
-    y_stem, _        = get_year_pillar(target_year)
+    ref_year = target_year - 1 if target_month == 1 else target_year
+    y_stem, _ = get_year_pillar(ref_year)
     y_stem_idx       = STEMS.index(y_stem)
     month_stem_start = (y_stem_idx % 5 * 2 + 2) % 10
 

@@ -200,26 +200,25 @@ class SajuPDF(FPDF):
         self.ln(6)
 
     # ── 마크다운 렌더러 ───────────────────────────────────────────────────────
-    def _render_markdown(self, text: str, x=20, width=170, line_h=12):
+    def _render_markdown(self, text: str, x=20, width=170, line_h=15):
         """
-        폰트 계층 (수정 v4):
-          h1/h2  : 번호 달린 섹션 제목 → 18pt Bold  (가장 큼)
-          h3     : 소소제목              → 18pt Bold
-          bold_line: [대괄호] 소제목   → 17pt Bold  (h1/h2보다 작고 본문보다 큼)
-          bullet/text: 본문             → 16pt       (가장 작음)
+        폰트 계층:
+        h1/h2  : 섹션 제목 → 18pt Bold
+        h3     : 소제목    → 18pt Bold
+        bold_line          → 18pt Bold
+        bullet/text: 본문  → 18pt
 
-        [수정 v5] auto_page_break=False 이므로, 각 블록을 그리기 직전에
-        필요 높이를 추정하고 부족하면 _new_content_page() 를 호출한다.
-        이렇게 하면 multi_cell 도중 fpdf2 가 헤더 없는 빈 페이지를 만드는 문제가 사라진다.
+        text/bullet 블록은 페이지 하단까지 최대한 채우고,
+        남은 내용은 다음 페이지에 이어서 출력 (문단 단위 통째로 넘기지 않음).
         """
-        PAGE_BOTTOM = 275  # 여백을 고려한 실질 하단 (mm)
+        PAGE_BOTTOM  = 235   # 실질 하단 (mm)
+        CHARS_PER_LINE = 33  # 18pt 한국어 기준 한 줄 글자 수 (실측 후 조정)
 
         blocks = parse_markdown_blocks(text)
         self.set_left_margin(x)
         self.set_right_margin(210 - x - width)
 
         def _new_content_page():
-            """현재 섹션 헤더를 유지하며 새 페이지 시작"""
             self.add_page()
             self._fill(C_OFFWHITE)
             self.rect(0, 0, 210, 297, style='F')
@@ -232,88 +231,161 @@ class SajuPDF(FPDF):
             self.set_right_margin(210 - x - width)
 
         def _estimate_lines(content: str, chars_per_line: int = 30) -> int:
-            """텍스트가 몇 줄로 wrapping 될지 대략 추정"""
             if not content:
                 return 1
             return max(1, (len(content) // chars_per_line) + 1)
 
+        _just_broke_page = [False]
+
+        def _new_content_page_tracked():
+            _new_content_page()
+            _just_broke_page[0] = True
+
         def _ensure_space(needed_mm: float):
-            """현재 Y 에서 needed_mm 만큼 공간이 없으면 새 페이지"""
+            """제목/bold_line 전용 — 공간 부족 시 새 페이지, 방금 넘긴 직후는 생략."""
+            if _just_broke_page[0]:
+                _just_broke_page[0] = False
+                return
             if self.get_y() + needed_mm > PAGE_BOTTOM:
-                _new_content_page()
+                _new_content_page_tracked()
+
+        def _draw_text_flowing(full_text: str, is_bullet: bool = False):
+            """
+            텍스트를 현재 페이지에 들어갈 만큼만 출력하고,
+            넘치면 새 페이지에서 이어서 출력.
+            fpdf get_string_width()로 실제 줄 수를 계산해 자름.
+            """
+            _just_broke_page[0] = False
+            self.set_font('KR', '', 18)
+            text_w = (width - 8) if is_bullet else width
+
+            def _count_wrapped_lines(s: str) -> int:
+                """실제 폭 기준으로 몇 줄인지 계산"""
+                total = 0
+                for raw_line in s.split('\n'):
+                    if not raw_line:
+                        total += 1
+                        continue
+                    words = list(raw_line)  # 한국어는 글자 단위로
+                    line_w = 0
+                    total += 1
+                    for ch in words:
+                        cw = self.get_string_width(ch)
+                        if line_w + cw > text_w:
+                            total += 1
+                            line_w = cw
+                        else:
+                            line_w += cw
+                return max(1, total)
+
+            def _split_to_fit(s: str, avail_lines: int):
+                sentence_ends = [i + 1 for i, ch in enumerate(s) if ch in '.。!！?？']
+
+                if not sentence_ends:
+                    return s, ''
+
+                best_cut = None
+                for end_idx in sentence_ends:
+                    chunk = s[:end_idx]
+                    if _count_wrapped_lines(chunk) <= avail_lines:
+                        best_cut = end_idx
+                    else:
+                        break
+
+                if best_cut is None:
+                    best_cut = sentence_ends[0]
+
+                return s[:best_cut], s[best_cut:].lstrip()
+
+            remaining = full_text
+            while remaining:
+                avail_lines = max(1, int((PAGE_BOTTOM - self.get_y()) // line_h))
+
+                total_lines = _count_wrapped_lines(remaining)
+
+                if total_lines <= avail_lines:
+                    chunk = remaining
+                    remaining = ''
+                else:
+                    chunk, remaining = _split_to_fit(remaining, avail_lines)
+
+                self.set_font('KR', '', 18)
+                self._text_color(C_TEXT_DARK)
+
+                if is_bullet:
+                    self._fill(C_GOLD)
+                    self.ellipse(x + 1, self.get_y() + 4.5, 3, 3, style='F')
+                    self.set_x(x + 8)
+                    self.multi_cell(width - 8, line_h, chunk,
+                                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                else:
+                    self.set_x(x)
+                    self.multi_cell(width, line_h, chunk,
+                                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+                if remaining:
+                    _new_content_page_tracked()
+                    _just_broke_page[0] = False
 
         for btype, content in blocks:
 
             if btype == 'blank':
-                # blank 는 높이가 작으므로 여유 있을 때만 추가
+                _just_broke_page[0] = False
                 if self.get_y() + 5 <= PAGE_BOTTOM:
                     self.ln(5)
 
             elif btype == 'h1':
                 lines = _estimate_lines(content, 25)
-                # 제목 높이 + 본문 최소 8줄(96mm) — 고아 제목 방지 (강화)
-                _ensure_space(6 + lines * 13 + 3 + 96)
+                _ensure_space(6 + lines * line_h + 3)
                 self.ln(6)
                 self.set_font('KR', 'B', 18)
                 self._text_color(C_CHARCOAL)
                 self.set_x(x)
-                self.multi_cell(width, 13, content, align='L', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(width, line_h, content, align='L',
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(3)
 
             elif btype == 'h2':
                 lines = _estimate_lines(content, 25)
-                # 제목 높이 + 본문 최소 8줄(96mm) — 고아 제목 방지 (강화)
-                _ensure_space(5 + lines * 13 + 3 + 96)
+                _ensure_space(5 + lines * line_h + 3)
                 self.ln(5)
                 self._fill(C_GOLD)
-                self.rect(x, self.get_y(), 5, 11, style='F')
+                self.rect(x, self.get_y() + 2, 4, line_h - 4, style='F')
                 self.set_font('KR', 'B', 18)
                 self._text_color(C_CHARCOAL)
                 self.set_x(x + 10)
-                self.multi_cell(width - 10, 13, content, align='L', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(width - 10, line_h, content, align='L',
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(3)
 
             elif btype == 'h3':
                 lines = _estimate_lines(content, 28)
-                # 제목 높이 + 본문 최소 8줄(96mm) — 고아 제목 방지 (강화)
-                _ensure_space(10 + lines * 10 + 2 + 96)
+                _ensure_space(10 + lines * line_h + 2)
                 self.ln(10)
                 self.set_font('KR', 'B', 18)
                 self._text_color(C_ACCENT)
                 self.set_x(x)
-                self.multi_cell(width, 10, content, align='L', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                self.ln(2)
+                self.multi_cell(width, line_h, content, align='L',
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.ln(3)
 
             elif btype == 'bold_line':
+                _just_broke_page[0] = False
                 lines = _estimate_lines(content, 28)
-                # bold_line도 뒤에 본문 최소 3줄 보장
-                _ensure_space(lines * 11 + 2 + 48)
-                self.set_font('KR', 'B', 17)
+                _ensure_space(lines * line_h + 2)
+                self.set_font('KR', 'B', 18)
                 self._text_color(C_CHARCOAL)
                 self.set_x(x)
-                self.multi_cell(width, 11, content.lstrip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(width, line_h, content.lstrip(),
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(2)
 
             elif btype == 'bullet':
-                lines = _estimate_lines(content, 28)
-                _ensure_space(lines * line_h + 1)
-                self.set_font('KR', '', 16)
-                self._text_color(C_TEXT_DARK)
-                self._fill(C_GOLD)
-                self.ellipse(x + 1, self.get_y() + 4.5, 3, 3, style='F')
-                self.set_x(x + 8)
-                self.multi_cell(width - 8, line_h, strip_markdown(content),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                _draw_text_flowing(strip_markdown(content), is_bullet=True)
                 self.ln(1)
 
             else:  # text
-                lines = _estimate_lines(content, 28)
-                _ensure_space(lines * line_h)
-                self.set_font('KR', '', 16)
-                self._text_color(C_TEXT_DARK)
-                self.set_x(x)
-                self.multi_cell(width, line_h, strip_markdown(content),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                _draw_text_flowing(strip_markdown(content))
 
         self.set_left_margin(0)
         self.set_right_margin(0)
@@ -949,7 +1021,7 @@ class SajuPDF(FPDF):
         self.set_font('KR', '', 13)
         self._text_color(C_TEXT_LIGHT)
         self.set_xy(0, 233)
-        self.cell(210, 8, '— AI 사주 분석 시스템 —', align='C')
+        self.cell(210, 8, '— 사주 분석 시스템 —', align='C')
         self.set_font('KR-Light', '', 12)
         self.set_xy(0, 242)
         self.cell(210, 8, today, align='C')
@@ -1009,8 +1081,6 @@ def generate_pdf(saju_data: dict, analysis: dict,
         toc_entries.append(('[운세]', '향후 10년 연간 운세'))
     if analysis.get("monthly"):
         toc_entries.append(('[월운]', f'{year_str} 월별 운세'))
-
-    toc_entries.append(('[마무리]', '맺음말'))
 
     pdf.add_cover(saju_data, today)
     pdf.add_toc(toc_entries)

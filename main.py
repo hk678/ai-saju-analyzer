@@ -30,12 +30,13 @@ def get_user_input() -> dict:
     print("   ✦ AI 사주 리포트 자동화 시스템 ✦")
     print("="*60 + "\n")
 
-    name   = input("이름을 입력하세요: ").strip() or "홍길동"
-    birth  = input("생년월일을 입력하세요 (예: 1990-05-15): ").strip() or "1990-05-15"
-    hour   = input("태어난 시각 - 시 (예: 10, 모르면 엔터): ").strip() or "10"
+    name   = input("이름: ").strip() or "홍길동"
+    birth  = input("생년월일 (예: 1990-05-15): ").strip() or "1990-05-15"
+    hour   = input("태어난 시각 - 시 (예: 05, 모르면 엔터): ").strip() or "10"
     minute = input("태어난 시각 - 분 (예: 30, 모르면 엔터): ").strip() or "0"
-    gender = input("성별을 입력하세요 (남/여): ").strip() or "남"
-    rtype  = input("리포트 유형 (basic/premium, 기본값 basic): ").strip() or "basic"
+    gender = input("성별 (남/여): ").strip() or "남"
+    rtype_input = input("리포트 유형 (1: 기본, 2: 프리미엄 (기본값 1)): ").strip()
+    rtype = "premium" if rtype_input == "2" else "basic"
 
     current_year = datetime.now().year
     year_input = input(
@@ -193,7 +194,8 @@ def run_pipeline(user_info: dict, api_key: str):
     # return str(out_dir), word_path
 
     # PDF 생성
-    pdf_path = str(out_dir / f"사주리포트_{user_info['name']}.pdf")
+    prefix = "[기본]" if user_info["report_type"] == "basic" else "[프리미엄]"
+    pdf_path = str(out_dir / f"{prefix} 사주리포트_{user_info['name']}님.pdf")
     try:
         generate_pdf(saju_data, analysis, pdf_path, chart_paths,
                     user_info["report_type"], target_year)
@@ -204,9 +206,11 @@ def run_pipeline(user_info: dict, api_key: str):
     return str(out_dir), pdf_path
 
 
-def regenerate_docu_only(out_dir: str):
+def regenerate_docu_only(out_dir: str, report_type: str = "basic"):
     out_dir = Path(out_dir)
     print("\n🔁 문서 재생성 모드")
+
+    prefix = "[기본]" if report_type == "basic" else "[프리미엄]"
 
     with open(out_dir / "saju_data.json", encoding="utf-8") as f:
         saju_data = json.load(f)
@@ -232,9 +236,9 @@ def regenerate_docu_only(out_dir: str):
     #     import traceback; traceback.print_exc()
 
     # PDF 재생성
-    pdf_path = str(out_dir / f"사주리포트_{name}.pdf")
+    pdf_path = str(out_dir / f"{prefix} 사주리포트_{name}님.pdf")
     try:
-        generate_pdf(saju_data, analysis, pdf_path, chart_paths, "basic", target_year)
+        generate_pdf(saju_data, analysis, pdf_path, chart_paths, report_type, target_year)
         print(f"✅ PDF 재생성 완료: {pdf_path}")
     except Exception as e:
         print(f"❌ PDF 생성 실패: {e}")
@@ -279,13 +283,14 @@ if __name__ == "__main__":
     load_dotenv()
 
     print("\n모드 선택:")
-    print("  1: 전체 실행 (만세력 → AI 분석 → PDF)")
-    print("  2: 문서만 재생성 (기존 JSON 사용)")
-    mode = input("선택 (1/2): ").strip()
+    mode = input("  1: 전체 실행, 2: 문서만 재생성: ").strip()
 
     if mode == "2":
-        path = input("기존 output 폴더 경로 입력: ").strip()
-        regenerate_docu_only(path)
+        print("\n리포트 유형 선택:")
+        rtype_input = input("  1: 기본, 2: 프리미엄 (기본값 1): ").strip()
+        rtype = "premium" if rtype_input == "2" else "basic"
+        path = input("\n기존 output 폴더 경로 입력: ").strip()
+        regenerate_docu_only(path, rtype)
         exit()
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
