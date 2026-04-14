@@ -2,33 +2,26 @@
 PDF 생성 모듈 (fpdf2 기반 - Windows 호환)
 - HTML 디자인(골드/차콜/화이트 팔레트, glass-card 스타일) 반영
 - NanumGothic 폰트로 한국어/한자 완전 지원
-- 표지 → 목차 → 사주원국 → 분석섹션들 → 마지막 페이지
+- 표지 → 목차 → 분석섹션들 → 마지막 페이지
 
-[수정 사항 v4]
-Bug Fix:
-  1. 목차 페이지 번호 제거 (숫자 셀 + 점선 삭제)
-  2. 폰트 사이즈 전반 2pt 상향 조정
-  3. add_cover()의 '생년월일시' → '생년월일' 키 오류 수정
-  4. 신강신약 한자(身弱/身強) KR-Light 폰트 누락 → KR 폰트로 변경
-  5. TSI subset 경고 무시 (fpdf2 내부 이슈, 기능에 영향 없음)
+[수정 사항 v7 - 아이콘 제거]
+- 목차, 섹션 헤더에서 [~] 형태 아이콘 완전 제거
+- icon 파라미터 제거 및 관련 코드 정리
 
-[수정 사항 v5]
-  8. 고아 제목(orphan heading) 방지 강화:
-     - h1/h2/h3 _ensure_space 후행 보장치 48mm → 96mm 로 상향
-       (제목 뒤 최소 8줄 분량의 본문이 같은 페이지에 오도록 강제)
-     - bold_line도 뒤에 본문 48mm 보장 추가
-     - 이로써 "제목만 있고 내용은 다음 페이지" 현상 제거
+[수정 사항 v6 - 구성 재편]
+1. 기본/프리미엄 리포트 흐름 완전 분리
+   - 기본: 표지 → 목차 → 사주원국 소개 → 성격 → 전반운세 → 신년총평 → 마무리
+   - 프리미엄: 표지 → 목차 → 6개 분석섹션 → 월별운세(각 월 새 페이지) → 10년연간운세(각 연도 새 페이지) → 마무리
+2. add_yearly_section: 연도별 반드시 새 페이지 시작
+3. add_monthly_section: 월별 반드시 새 페이지 시작
+4. 목차 순서: 프리미엄은 월별운세 → 10년연간운세 순서
+5. 기본 리포트 add_basic_saju_intro 추가 (원국 도식 + 2~3줄 설명)
 
-[수정 사항 v4 - 신규]
-  6. 폰트 계층 구조 수정:
-     - h1/h2 (번호 달린 섹션 제목): 18pt Bold → 가장 큼
-     - bold_line ([대괄호] 소제목): 17pt Bold → 섹션 제목보다 작고 본문보다 큼
-     - bullet/text (본문): 16pt → 가장 작음
-  7. 헤더 누락 페이지 수정:
-     - _render_markdown 내 모든 페이지 넘김(_new_content_page) 시 헤더 출력
-     - add_saju_chart, add_seun_section, add_wolun_section 등 테이블 섹션도
-       페이지 넘김 시 헤더 재출력하도록 통일
-     - add_epilogue는 독립 디자인 페이지로 헤더 없음 유지
+[이전 수정 사항 유지]
+- 고아 제목(orphan heading) 방지
+- 폰트 계층 구조 (h1/h2: 18pt Bold / bullet/text: 18pt)
+- 헤더 누락 페이지 수정
+- add_epilogue는 독립 디자인 페이지로 헤더 없음
 """
 
 import os
@@ -90,7 +83,6 @@ def strip_markdown(text: str) -> str:
 def parse_markdown_blocks(text: str):
     blocks = []
     for line in text.split('\n'):
-        # --- 구분선은 완전히 무시
         stripped = line.strip()
         if re.match(r'^-{2,}$', stripped) or re.match(r'^_{2,}$', stripped) or re.match(r'^\*{2,}$', stripped):
             continue
@@ -144,13 +136,10 @@ class SajuPDF(FPDF):
 
     def __init__(self):
         super().__init__(orientation='P', unit='mm', format='A4')
-        # [수정 v5] auto page break 비활성화 — multi_cell 도중 헤더 없는 빈 페이지 생성 방지
-        # 대신 _render_markdown 에서 블록별로 필요 높이를 계산해 수동 페이지 넘김
         self.set_auto_page_break(auto=False)
         self._register_fonts()
         self.set_margins(0, 0, 0)
         self._page_num_enabled = False
-        self._current_section_icon  = ''
         self._current_section_title = ''
 
     def _register_fonts(self):
@@ -201,18 +190,8 @@ class SajuPDF(FPDF):
 
     # ── 마크다운 렌더러 ───────────────────────────────────────────────────────
     def _render_markdown(self, text: str, x=20, width=170, line_h=15):
-        """
-        폰트 계층:
-        h1/h2  : 섹션 제목 → 18pt Bold
-        h3     : 소제목    → 18pt Bold
-        bold_line          → 18pt Bold
-        bullet/text: 본문  → 18pt
-
-        text/bullet 블록은 페이지 하단까지 최대한 채우고,
-        남은 내용은 다음 페이지에 이어서 출력 (문단 단위 통째로 넘기지 않음).
-        """
-        PAGE_BOTTOM  = 235   # 실질 하단 (mm)
-        CHARS_PER_LINE = 33  # 18pt 한국어 기준 한 줄 글자 수 (실측 후 조정)
+        PAGE_BOTTOM  = 235
+        CHARS_PER_LINE = 33
 
         blocks = parse_markdown_blocks(text)
         self.set_left_margin(x)
@@ -222,11 +201,8 @@ class SajuPDF(FPDF):
             self.add_page()
             self._fill(C_OFFWHITE)
             self.rect(0, 0, 210, 297, style='F')
-            if self._current_section_icon:
-                self._draw_section_header(
-                    self._current_section_icon,
-                    self._current_section_title
-                )
+            if self._current_section_title:
+                self._draw_section_header(self._current_section_title)
             self.set_left_margin(x)
             self.set_right_margin(210 - x - width)
 
@@ -242,7 +218,6 @@ class SajuPDF(FPDF):
             _just_broke_page[0] = True
 
         def _ensure_space(needed_mm: float):
-            """제목/bold_line 전용 — 공간 부족 시 새 페이지, 방금 넘긴 직후는 생략."""
             if _just_broke_page[0]:
                 _just_broke_page[0] = False
                 return
@@ -250,26 +225,19 @@ class SajuPDF(FPDF):
                 _new_content_page_tracked()
 
         def _draw_text_flowing(full_text: str, is_bullet: bool = False):
-            """
-            텍스트를 현재 페이지에 들어갈 만큼만 출력하고,
-            넘치면 새 페이지에서 이어서 출력.
-            fpdf get_string_width()로 실제 줄 수를 계산해 자름.
-            """
             _just_broke_page[0] = False
             self.set_font('KR', '', 18)
             text_w = (width - 8) if is_bullet else width
 
             def _count_wrapped_lines(s: str) -> int:
-                """실제 폭 기준으로 몇 줄인지 계산"""
                 total = 0
                 for raw_line in s.split('\n'):
                     if not raw_line:
                         total += 1
                         continue
-                    words = list(raw_line)  # 한국어는 글자 단위로
                     line_w = 0
                     total += 1
-                    for ch in words:
+                    for ch in list(raw_line):
                         cw = self.get_string_width(ch)
                         if line_w + cw > text_w:
                             total += 1
@@ -280,10 +248,8 @@ class SajuPDF(FPDF):
 
             def _split_to_fit(s: str, avail_lines: int):
                 sentence_ends = [i + 1 for i, ch in enumerate(s) if ch in '.。!！?？']
-
                 if not sentence_ends:
                     return s, ''
-
                 best_cut = None
                 for end_idx in sentence_ends:
                     chunk = s[:end_idx]
@@ -291,18 +257,14 @@ class SajuPDF(FPDF):
                         best_cut = end_idx
                     else:
                         break
-
                 if best_cut is None:
                     best_cut = sentence_ends[0]
-
                 return s[:best_cut], s[best_cut:].lstrip()
 
             remaining = full_text
             while remaining:
                 avail_lines = max(1, int((PAGE_BOTTOM - self.get_y()) // line_h))
-
                 total_lines = _count_wrapped_lines(remaining)
-
                 if total_lines <= avail_lines:
                     chunk = remaining
                     remaining = ''
@@ -335,6 +297,7 @@ class SajuPDF(FPDF):
                     self.ln(5)
 
             elif btype == 'h1':
+                content = strip_markdown(content)
                 lines = _estimate_lines(content, 25)
                 _ensure_space(6 + lines * line_h + 3)
                 self.ln(6)
@@ -346,6 +309,7 @@ class SajuPDF(FPDF):
                 self.ln(3)
 
             elif btype == 'h2':
+                content = strip_markdown(content)
                 lines = _estimate_lines(content, 25)
                 _ensure_space(5 + lines * line_h + 3)
                 self.ln(5)
@@ -359,6 +323,7 @@ class SajuPDF(FPDF):
                 self.ln(3)
 
             elif btype == 'h3':
+                content = strip_markdown(content)
                 lines = _estimate_lines(content, 28)
                 _ensure_space(10 + lines * line_h + 2)
                 self.ln(10)
@@ -370,6 +335,7 @@ class SajuPDF(FPDF):
                 self.ln(3)
 
             elif btype == 'bold_line':
+                content = strip_markdown(content)
                 _just_broke_page[0] = False
                 lines = _estimate_lines(content, 28)
                 _ensure_space(lines * line_h + 2)
@@ -396,7 +362,7 @@ class SajuPDF(FPDF):
     def add_cover(self, saju_data: dict, today: str):
         self.add_page()
         name   = saju_data['기본정보']['이름']
-        birth  = saju_data['기본정보'].get('생년월일', saju_data['기본정보'].get('생년월일시', ''))
+        birth  = saju_data['기본정보'].get('생년월일', '')
         gender = saju_data['기본정보']['성별']
         ilju   = saju_data['사주원국']['일주']['간지']
         strength_raw = saju_data['일간정보']['신강신약']
@@ -498,7 +464,7 @@ class SajuPDF(FPDF):
 
         start_y = 60
         for i, entry in enumerate(toc_entries):
-            icon, title = entry[0], entry[1]
+            title = entry[0]
 
             item_y = start_y + i * 20
             if item_y > 270:
@@ -518,7 +484,7 @@ class SajuPDF(FPDF):
             self.set_font('KR-Med', '', 17)
             self._text_color(C_CHARCOAL)
             self.set_xy(38, item_y + 3)
-            self.cell(150, 8, f'{icon}  {title}')
+            self.cell(150, 8, title)
 
         self._divider(20, 278, 170, C_GOLD, 0.5)
         self.set_font('KR-Light', '', 9)
@@ -529,8 +495,7 @@ class SajuPDF(FPDF):
     # ══════════════════════════════════════════════════════════════════════════
     # 3. 섹션 페이지 헤더
     # ══════════════════════════════════════════════════════════════════════════
-    def _draw_section_header(self, section_icon: str, section_title: str):
-        """헤더 바만 그림 (페이지 추가 없이) — 연속 페이지 재출력에 사용"""
+    def _draw_section_header(self, section_title: str):
         self._fill(C_CHARCOAL)
         self.rect(0, 0, 210, 28, style='F')
         self._fill(C_GOLD)
@@ -538,26 +503,25 @@ class SajuPDF(FPDF):
         self.set_font('KR', 'B', 16)
         self._text_color(C_WHITE)
         self.set_xy(20, 9)
-        self.cell(150, 10, f'{section_icon}  {section_title}')
+        self.cell(150, 10, section_title)
         self.set_font('KR-Light', '', 14)
         self._text_color(C_GOLD)
         self.set_xy(150, 10)
         self.cell(40, 8, '사주 분석', align='R')
         self.set_y(45)
 
-    def _start_content_page(self, section_icon: str, section_title: str):
-        self._current_section_icon  = section_icon
+    def _start_content_page(self, section_title: str):
         self._current_section_title = section_title
         self.add_page()
         self._fill(C_OFFWHITE)
         self.rect(0, 0, 210, 297, style='F')
-        self._draw_section_header(section_icon, section_title)
+        self._draw_section_header(section_title)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 4. 사주 원국 페이지
+    # 4-A. 사주 원국 페이지 (프리미엄용 전체 데이터)
     # ══════════════════════════════════════════════════════════════════════════
     def add_saju_chart(self, saju_data: dict):
-        self._start_content_page('[분석]', '사주 원국 및 기본 데이터')
+        self._start_content_page('사주 원국 및 기본 데이터')
 
         pillars  = ['연주', '월주', '일주', '시주']
         card_w, card_h = 38, 52
@@ -610,9 +574,9 @@ class SajuPDF(FPDF):
         strength_display = _clean_strength(saju_data['일간정보']['신강신약'])
         info_items = [
             ('일간 (나의 본질)',
-             f"{saju_data['일간정보']['일간']} ({saju_data['일간정보']['오행']} · {saju_data['일간정보']['음양']})"),
+             f"{saju_data['일간정보']['일간']} ({saju_data['일간정보']['오행']} · {saju_data['일간정보'].get('음양', '')})"),
             ('신강/신약', strength_display),
-            ('음력 생년월일', saju_data['기본정보']['음력']),
+            ('음력 생년월일', saju_data['기본정보'].get('음력', '')),
             ('신살', ', '.join(saju_data.get('신살', ['없음']))),
         ]
         iw, ih = 82, 20
@@ -692,9 +656,8 @@ class SajuPDF(FPDF):
             self.ln(14)
 
         if '대운' in saju_data:
-            # [수정 v4] 대운 테이블이 페이지를 넘칠 경우 헤더 포함 새 페이지
             if self.get_y() > 220:
-                self._start_content_page('[분석]', '사주 원국 및 기본 데이터')
+                self._start_content_page('사주 원국 및 기본 데이터')
 
             self.set_font('KR', 'B', 11)
             self._text_color(C_CHARCOAL)
@@ -719,8 +682,7 @@ class SajuPDF(FPDF):
             for di, d in enumerate(saju_data['대운'][:8]):
                 ry = self.get_y()
                 if ry > 268:
-                    # [수정 v4] 헤더 포함 새 페이지
-                    self._start_content_page('[분석]', '사주 원국 및 기본 데이터')
+                    self._start_content_page('사주 원국 및 기본 데이터')
                     ry = self.get_y()
                 bg = (248, 248, 252) if di % 2 == 0 else C_WHITE
                 self._fill(bg); self._stroke(C_CARD_BORDER)
@@ -755,10 +717,110 @@ class SajuPDF(FPDF):
                 self.ln(9)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 5. 분석 섹션
+    # 4-B. 기본 리포트용 사주 원국 소개 (도식 + 2~3줄 설명)
     # ══════════════════════════════════════════════════════════════════════════
-    def add_analysis_section(self, icon: str, title: str, content: str):
-        self._start_content_page(icon, title)
+    def add_basic_saju_intro(self, saju_data: dict):
+        """기본 리포트용: 사주 원국 도식 + 오행 분포 + 2~3줄 간단 설명"""
+        self._start_content_page('사주 원국 소개')
+
+        pillars  = ['연주', '월주', '일주', '시주']
+        card_w, card_h = 38, 52
+        start_x = 17
+        gap = 4
+
+        for i, p in enumerate(pillars):
+            px = start_x + i * (card_w + gap)
+            py = self.get_y()
+            data   = saju_data['사주원국'][p]
+            stem   = data['천간']
+            branch = data['지지']
+            is_day = (p == '일주')
+
+            if is_day:
+                self._fill(C_CHARCOAL); self._stroke(C_GOLD)
+                self.set_line_width(1.0)
+            else:
+                self._fill(C_WHITE); self._stroke(C_CARD_BORDER)
+                self.set_line_width(0.3)
+            self._rounded_rect_v2(px, py, card_w, card_h, 4)
+            self.set_line_width(0.2)
+
+            self.set_font('KR-Light', '', 8)
+            self._text_color(C_GOLD if is_day else C_TEXT_LIGHT)
+            self.set_xy(px, py + 5)
+            self.cell(card_w, 5, p, align='C')
+
+            self.set_font('KR', 'B', 24)
+            self._text_color(C_WHITE if is_day else C_CHARCOAL)
+            self.set_xy(px, py + 12)
+            self.cell(card_w, 14, stem, align='C')
+
+            self._divider(px + 6, py + 26, card_w - 12,
+                          C_GOLD if is_day else C_CARD_BORDER, 0.3)
+
+            self.set_font('KR', 'B', 24)
+            self._text_color(C_WHITE if is_day else C_CHARCOAL)
+            self.set_xy(px, py + 28)
+            self.cell(card_w, 14, branch, align='C')
+
+            if is_day:
+                self.set_font('KR-Light', '', 7)
+                self._text_color(C_GOLD)
+                self.set_xy(px, py + 44)
+                self.cell(card_w, 6, '일주', align='C')
+
+        self.set_y(self.get_y() + card_h + 10)
+
+        # 오행 분포 바
+        elements = saju_data['오행분포']
+        total = max(sum(elements.values()), 1)
+        bar_x = 17
+        ew, eg = 32, 4
+        self.set_font('KR', 'B', 10)
+        self._text_color(C_CHARCOAL)
+        self.set_x(17)
+        self.cell(0, 6, '오행 분포', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.ln(1)
+        for ei, ek in enumerate(['목', '화', '토', '금', '수']):
+            val   = elements.get(ek, 0)
+            ex    = bar_x + ei * (ew + eg)
+            ey    = self.get_y()
+            color = ELEMENT_COLORS.get(ek, C_TEXT_MID)
+            self._fill((220, 225, 230))
+            self.rect(ex, ey, ew, 10, style='F')
+            if val > 0:
+                bar_fill_w = int(ew * val / max(total, 8))
+                self._fill(color)
+                self.rect(ex, ey, max(bar_fill_w, 3), 10, style='F')
+            self.set_font('KR', 'B', 9)
+            self._text_color(C_WHITE)
+            self.set_xy(ex + 2, ey + 1)
+            self.cell(ew - 4, 8, f'{ek}  {val}')
+        self.set_y(self.get_y() + 18)
+
+        # 2~3줄 핵심 설명
+        ilju     = saju_data['사주원국']['일주']['간지']
+        day_stem = saju_data['일간정보']['일간']
+        elem     = saju_data['일간정보']['오행']
+        strength = _clean_strength(saju_data['일간정보']['신강신약'])
+        shinsal  = ', '.join(saju_data.get('신살', ['없음']))
+
+        desc_lines = [
+            f"일주는 {ilju}으로, 일간 {day_stem}은 {elem} 오행의 에너지를 지닙니다.",
+            f"사주 전체의 강약은 {strength}이며, 원국에 담긴 신살은 {shinsal}입니다.",
+        ]
+        self.set_font('KR', '', 13)
+        self._text_color(C_TEXT_DARK)
+        for line in desc_lines:
+            self.set_x(17)
+            self.multi_cell(176, 14, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.ln(4)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 5. 분석 섹션 (각 챕터는 반드시 새 페이지 시작)
+    # ══════════════════════════════════════════════════════════════════════════
+    def add_analysis_section(self, title: str, content: str):
+        self._start_content_page(title)
         self._render_markdown(content, x=20, width=170)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -767,7 +829,7 @@ class SajuPDF(FPDF):
     def add_seun_section(self, seun_list: list):
         if not seun_list:
             return
-        self._start_content_page('[세운]', '세운(年運) 데이터')
+        self._start_content_page('세운(年運) 데이터')
 
         headers = ['연도', '간지', '천간오행', '천간십성', '지지오행', '지지십성', '12운성', '신살']
         col_ws  = [20,     18,      20,         24,          20,         24,          20,        25]
@@ -789,8 +851,7 @@ class SajuPDF(FPDF):
         for di, seun in enumerate(seun_list):
             ry = self.get_y()
             if ry > 268:
-                # [수정 v4] 헤더 포함 새 페이지
-                self._start_content_page('[세운]', '세운(年運) 데이터')
+                self._start_content_page('세운(年運) 데이터')
                 _draw_header()
                 ry = self.get_y()
 
@@ -832,7 +893,7 @@ class SajuPDF(FPDF):
         if not wolun_list:
             return
         year = wolun_list[0]["연도"]
-        self._start_content_page('[월운]', f'{year}년 월운(月運) 데이터')
+        self._start_content_page(f'{year}년 월운(月運) 데이터')
 
         headers = ['월',  '간지', '천간오행', '천간십성', '지지오행', '지지십성', '12운성', '신살']
         col_ws  = [14,    18,      20,         24,          20,         24,          20,        31]
@@ -854,8 +915,7 @@ class SajuPDF(FPDF):
         for di, wolun in enumerate(wolun_list):
             ry = self.get_y()
             if ry > 268:
-                # [수정 v4] 헤더 포함 새 페이지
-                self._start_content_page('[월운]', f'{year}년 월운(月運) 데이터')
+                self._start_content_page(f'{year}년 월운(月運) 데이터')
                 self._fill(C_CHARCOAL)
                 self.rect(17, self.get_y(), 171, 9, style='F')
                 self.set_font('KR-Light', '', 8)
@@ -900,72 +960,43 @@ class SajuPDF(FPDF):
             self.ln(9)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 8. 연간 운세 (AI 분석 텍스트)
-    # ══════════════════════════════════════════════════════════════════════════
-    def add_yearly_section(self, yearly: dict):
-        self._start_content_page('[운세]', '향후 10년 연간 운세')
-
-        for year_key, content in yearly.items():
-            if self.get_y() > 250:
-                self._start_content_page('[운세]', '향후 10년 연간 운세 (계속)')
-
-            self._fill(C_CHARCOAL)
-            self.rect(20, self.get_y(), 170, 13, style='F')
-            self._fill(C_GOLD)
-            self.rect(20, self.get_y(), 3, 13, style='F')
-            self.set_font('KR', 'B', 12)
-            self._text_color(C_WHITE)
-            self.set_xy(26, self.get_y() + 2)
-            self.cell(160, 9, f'{year_key}년 운세')
-            self.ln(17)
-
-            self._render_markdown(content, x=20, width=170)
-            self.ln(4)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # 9. 월별 운세 (AI 분석 텍스트)
+    # 8. 월별 운세 — 월별 반드시 새 페이지
     # ══════════════════════════════════════════════════════════════════════════
     def add_monthly_section(self, monthly: dict, target_year: int = None):
         year_str = f"{target_year}년 " if target_year else "올해 "
-        self._start_content_page('[월운]', f'{year_str}월별 운세')
         month_names = ['1월','2월','3월','4월','5월','6월',
                        '7월','8월','9월','10월','11월','12월']
 
         for month_key, content in monthly.items():
             mn = month_names[int(month_key) - 1]
-            if self.get_y() > 255:
-                self._start_content_page('[월운]', f'{year_str}월별 운세 (계속)')
-
-            self._fill((240, 242, 248)); self._stroke(C_CARD_BORDER)
-            self.set_line_width(0.3)
-            self.rect(20, self.get_y(), 170, 10, style='FD')
-            self._fill(C_GOLD)
-            self.rect(20, self.get_y(), 3, 10, style='F')
-            self.set_font('KR', 'B', 11)
-            self._text_color(C_CHARCOAL)
-            self.set_xy(26, self.get_y() + 1)
-            self.cell(160, 8, mn)
-            self.ln(14)
-
-            self._render_markdown(content, x=20, width=170, line_h=12)
-            self.ln(3)
+            self._start_content_page(f'{year_str}{mn} 운세')
+            self._render_markdown(content, x=20, width=170)
+            self.ln(4)
+            
+    # ══════════════════════════════════════════════════════════════════════════
+    # 9. 향후 10년 연간 운세 — 연도별 반드시 새 페이지
+    # ══════════════════════════════════════════════════════════════════════════
+    def add_yearly_section(self, yearly: dict):
+        for year_key, content in yearly.items():
+            self._start_content_page(f'{year_key}년 연간 운세')
+            self._render_markdown(content, x=20, width=170)
+            self.ln(4)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 10. 올해 운세 / 요약
+    # 10. 올해 운세 / 요약 (기본 리포트용)
     # ══════════════════════════════════════════════════════════════════════════
     def add_this_year_section(self, content: str, target_year: int = None):
         year_str = f"{target_year}년" if target_year else "올해"
-        self._start_content_page('[운세]', f'{year_str} 운세')
+        self._start_content_page(f'{year_str} 간략 총평')
         self._render_markdown(content, x=20, width=170)
 
     def add_summary_section(self, content: str, target_year: int = None):
         year_str = f"{target_year}년 " if target_year else ""
-        self._start_content_page('[분석]', f'{year_str}분야별 운세 요약')
+        self._start_content_page(f'{year_str}전반 운세')
         self._render_markdown(content, x=20, width=170)
 
     # ══════════════════════════════════════════════════════════════════════════
     # 11. 마지막 페이지
-    # [수정 v4] 마지막 페이지 인용문 폰트를 16pt로 명시 (헤더 없는 독립 디자인 유지)
     # ══════════════════════════════════════════════════════════════════════════
     def add_epilogue(self, name: str, today: str):
         self.add_page()
@@ -1003,7 +1034,6 @@ class SajuPDF(FPDF):
             f'{name} 님의 삶에',
             '작은 빛이 되기를 바랍니다.',
         ]
-        # [수정 v4] 본문과 동일한 16pt 폰트 적용
         self.set_font('KR', '', 16)
         self._text_color((210, 215, 228))
         ty = qy + 28
@@ -1043,71 +1073,74 @@ def generate_pdf(saju_data: dict, analysis: dict,
     today = _today_str()
     pdf   = SajuPDF()
 
-    # target_year 미지정 시 세운 데이터에서 자동 추출
     if target_year is None:
         seun_list = saju_data.get("세운", [])
         target_year = seun_list[0]["연도"] if seun_list else datetime.now().year
 
     year_str = f"{target_year}년"
+    name = saju_data['기본정보']['이름']
 
-    section_configs = [
-        ("personality",  "[성격]", "타고난 본질과 성격"),
-        ("wealth",       "[재물]", "재물운 상세 분석"),
-        ("career",       "[직업]", "직업·직장운 상세 분석"),
-        ("love",         "[애정]", "연애·결혼운 상세 분석"),
-        ("health",       "[건강]", "건강운 상세 분석"),
-        ("lucky_charm",  "[개운]", "맞춤형 개운 가이드"),
-    ]
-
-    toc_entries = []
-    # toc_entries.append(('[분석]', '사주 원국 및 기본 데이터'))
-
-    # has_seun  = bool(saju_data.get("세운"))
-    # has_wolun = bool(saju_data.get("월운"))
-    # if has_seun:
-    #     toc_entries.append(('[세운]', '세운(年運) 데이터'))
-    # if has_wolun:
-    #     toc_entries.append(('[월운]', '월운(月運) 데이터'))
-
-    for key, icon, title in section_configs:
-        if analysis.get(key):
-            toc_entries.append((icon, title))
-
-    if analysis.get("this_year"):
-        toc_entries.append(('[운세]', f'{year_str} 운세'))
-    if analysis.get("summary"):
-        toc_entries.append(('[분석]', f'{year_str} 분야별 운세 요약'))
-    if analysis.get("yearly"):
-        toc_entries.append(('[운세]', '향후 10년 연간 운세'))
-    if analysis.get("monthly"):
-        toc_entries.append(('[월운]', f'{year_str} 월별 운세'))
-
+    # ── 표지 ──
     pdf.add_cover(saju_data, today)
-    pdf.add_toc(toc_entries)
-    pdf._page_num_enabled = True
 
-    # pdf.add_saju_chart(saju_data)
+    if report_type == "basic":
+        # ══ 기본 리포트 흐름 ══
+        toc_entries = [
+            ('사주 원국 소개',),
+            ('타고난 성격과 기질',),
+            ('전반 운세',),
+            (f'{year_str} 간략 총평',),
+        ]
+        pdf.add_toc(toc_entries)
+        pdf._page_num_enabled = True
 
-    # if has_seun:
-    #     pdf.add_seun_section(saju_data["세운"])
-    # if has_wolun:
-    #     pdf.add_wolun_section(saju_data["월운"])
+        pdf.add_basic_saju_intro(saju_data)
 
-    for key, icon, title in section_configs:
-        content = analysis.get(key, "")
-        if content:
-            pdf.add_analysis_section(icon, title, content)
+        if analysis.get("personality"):
+            pdf.add_analysis_section('타고난 성격과 기질', analysis["personality"])
 
-    if analysis.get("this_year"):
-        pdf.add_this_year_section(analysis["this_year"], target_year)
-    if analysis.get("summary"):
-        pdf.add_summary_section(analysis["summary"], target_year)
-    if analysis.get("yearly"):
-        pdf.add_yearly_section(analysis["yearly"])
-    if analysis.get("monthly"):
-        pdf.add_monthly_section(analysis["monthly"], target_year)
+        if analysis.get("summary"):
+            pdf.add_summary_section(analysis["summary"], target_year)
 
-    pdf.add_epilogue(saju_data['기본정보']['이름'], today)
+        if analysis.get("this_year"):
+            pdf.add_this_year_section(analysis["this_year"], target_year)
+
+    else:
+        # ══ 프리미엄 리포트 흐름 ══
+        section_configs = [
+            ("personality",  "타고난 본질과 성격"),
+            ("wealth",       "재물운 상세 분석"),
+            ("career",       "직업·직장운 상세 분석"),
+            ("love",         "연애·결혼운 상세 분석"),
+            ("health",       "건강운 상세 분석"),
+            ("lucky_charm",  "맞춤형 개운 가이드"),
+        ]
+
+        toc_entries = []
+        for key, title in section_configs:
+            if analysis.get(key):
+                toc_entries.append((title,))
+        if analysis.get("monthly"):
+            toc_entries.append((f'{year_str} 월별 운세',))
+        if analysis.get("yearly"):
+            toc_entries.append(('향후 10년 연간 운세',))
+
+        pdf.add_toc(toc_entries)
+        pdf._page_num_enabled = True
+
+        for key, title in section_configs:
+            content = analysis.get(key, "")
+            if content:
+                pdf.add_analysis_section(title, content)
+
+        if analysis.get("monthly"):
+            pdf.add_monthly_section(analysis["monthly"], target_year)
+
+        if analysis.get("yearly"):
+            pdf.add_yearly_section(analysis["yearly"])
+
+    # 마무리
+    pdf.add_epilogue(name, today)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     pdf_bytes = pdf.output()
@@ -1117,29 +1150,5 @@ def generate_pdf(saju_data: dict, analysis: dict,
     return output_path
 
 
-# ── 단독 실행 테스트 ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, os.path.dirname(__file__))
-    from saju_calculator import calculate_saju, get_seun, get_wolun
-    from datetime import datetime
-
-    dummy_saju = calculate_saju("홍길동", 1995, 12, 13, 23, "남", 0)
-    today_year = datetime.now().year
-    d_stem     = dummy_saju["일간정보"]["일간"]
-    y_branch   = dummy_saju["사주원국"]["연주"]["지지"]
-
-    dummy_saju["세운"] = [get_seun(today_year + i, d_stem, y_branch) for i in range(10)]
-    dummy_saju["월운"] = [get_wolun(today_year, m, d_stem, y_branch) for m in range(1, 13)]
-
-    dummy_analysis = {
-        "personality": "## 타고난 본질\n\n일간 **戊土**는 대지를 상징합니다.\n\n### 핵심 기질\n- 강한 책임감\n- 포용력",
-        "wealth":      "## 재물운\n\n안정적인 재물 흐름이 예상됩니다.",
-        "summary":     "## 요약\n\n### 재물운\n상승세입니다.\n\n### 건강운\n과로 주의.",
-        "this_year":   "## 올해 운세\n\n좋은 기운이 들어오는 해입니다.",
-    }
-
-    out = "/tmp/saju_test/test_report.pdf"
-    os.makedirs("/tmp/saju_test", exist_ok=True)
-    generate_pdf(dummy_saju, dummy_analysis, out)
-    print(f"테스트 완료: {out}")
+    print("pdf_generator 모듈 로드 완료")
