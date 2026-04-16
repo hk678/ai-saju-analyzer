@@ -377,6 +377,85 @@ def analyze_lucky_charm(model, saju_data: dict, db: dict) -> str:
     return call_gemini(model, prompt)
 
 
+def analyze_relationships(model, saju_data: dict, db: dict) -> str:
+    """섹션 7: 인간관계·가족운 상세 분석 (A4 2.5장 이상)"""
+    full_name  = saju_data['기본정보']['이름']
+    origin_ctx = _build_origin_context(saju_data)
+
+    prompt = f"""
+[사주 데이터]
+이름: {full_name}
+성별: {saju_data['기본정보']['성별']}
+
+{origin_ctx}
+
+[작성 요청]
+'인간관계·가족운 상세 분석' 파트를 A4 2.5장(1,200자) 이상 작성하세요.
+※ 인사말·본인 소개 없이 ## 소제목으로 바로 시작할 것
+※ 소제목은 반드시 ## 형식만 사용하고, 소제목에 번호(1. 2. 3. 등)를 절대 붙이지 말 것
+※ 의뢰인 호칭은 반드시 '{full_name} 님'으로만 표기할 것 (성 생략 금지)
+
+반드시 아래 각 항목을 ## 소제목으로 구성할 것:
+- 부모와의 인연과 정서적 영향: 사주 구조로 본 부모와의 관계 패턴 및 심리적 영향
+- 형제자매·가족과의 거리감: 가족 관계에서 나타나는 친밀도와 거리감의 구조
+- 가족으로 인해 짊어지기 쉬운 짐: 이 사주에서 반복되는 가족 관련 부담 패턴
+- 인간관계에서 반복되는 갈등 구조: 대인관계에서 되풀이되는 갈등의 원인과 패턴
+- 귀인운과 사람을 잘못 믿는 구조: 귀인 여부, 배신·손해를 부르는 관계 패턴 여부
+- 평생 옆에 남는 사람의 유형: 장기적으로 인연이 이어지는 사람의 특성
+- 외로움·고립·인정욕구의 작동 방식: 내면의 정서 패턴과 사회적 관계 욕구 구조
+"""
+    return call_gemini(model, prompt)
+
+
+def analyze_lifetime(model, saju_data: dict, db: dict) -> str:
+    """섹션 8: 평생 총운 (대운 기준, 1,200자 이내)"""
+    full_name  = saju_data['기본정보']['이름']
+    origin_ctx = _build_origin_context(saju_data)
+
+    # 대운 목록을 프롬프트용 문자열로 구성
+    daewun_list = saju_data.get("대운", [])
+    daewun_lines = []
+    for i, dw in enumerate(daewun_list):
+        gan  = dw["간지"]["천간"]
+        ji   = dw["간지"]["지지"]
+        gan_ss = dw["천간"]["십성"]["값"]
+        ji_ss  = dw["지지"]["십성"]["값"]
+        ji_12  = dw["지지"]["12운성"]
+        sal    = "/".join(dw["지지"]["신살"]) if dw["지지"]["신살"] else "없음"
+        end_age = daewun_list[i+1]["시작나이"] - 1 if i+1 < len(daewun_list) else dw["시작나이"] + 9
+        daewun_lines.append(
+            f"  {dw['시작나이']}세~{end_age}세 ({gan}{ji}): "
+            f"천간십성={gan_ss} / 지지십성={ji_ss} / 12운성={ji_12} / 신살={sal}"
+        )
+    daewun_ctx = "\n".join(daewun_lines)
+
+    prompt = f"""
+[사주 데이터]
+이름: {full_name}
+
+{origin_ctx}
+
+[대운 목록]
+{daewun_ctx}
+
+[작성 요청]
+위 대운 목록을 기준으로 '{full_name} 님'의 평생 총운을 작성하세요.
+※ 반드시 1,200자 이내로 작성할 것 (초과 엄금)
+※ 인사말·본인 소개 없이 ## 소제목으로 바로 시작할 것
+※ 각 대운을 ## 소제목으로 구성할 것 (예: ## 3세~12세 갑자 대운)
+※ 소제목에 번호(1. 2. 3. 등)를 절대 붙이지 말 것
+※ 의뢰인 호칭은 반드시 '{full_name} 님'으로만 표기할 것 (성 생략 금지)
+※ 각 대운당 3~5줄(150자 내외)로 간결하게 서술할 것
+
+각 대운마다 아래 내용을 자연스럽게 녹여 서술할 것 (항목 제목 표기 금지):
+- 주된 운의 색깔과 잘 풀리는/막히는 분야
+- 재물·직업·인간관계·연애의 흐름
+- 건강 주의 포인트
+- 인생 방향이 바뀌는 전환점 여부
+"""
+    return call_gemini(model, prompt)
+
+
 def analyze_monthly_fortune(model, saju_data: dict, wolun: dict) -> str:
     """
     월운(月運) 분석
@@ -644,7 +723,7 @@ def generate_premium_report(api_key: str, saju_data: dict,
     wolun_list = saju_data.get("월운", [])
     seun_list  = saju_data.get("세운", [])
 
-    total_steps = 6 + len(seun_list) + len(wolun_list)
+    total_steps = 8 + len(seun_list) + len(wolun_list)
     step = 0
 
     def progress(msg):
@@ -680,6 +759,14 @@ def generate_premium_report(api_key: str, saju_data: dict,
 
     progress("개운 가이드 작성 중...")
     results["lucky_charm"] = analyze_lucky_charm(model, saju_data, db)
+    time.sleep(1)
+
+    progress("인간관계·가족운 분석 중...")
+    results["relationships"] = analyze_relationships(model, saju_data, db)
+    time.sleep(1)
+
+    progress("평생 총운 분석 중...")
+    results["lifetime"] = analyze_lifetime(model, saju_data, db)
     time.sleep(1)
 
     # ── 월운 루프 ──

@@ -1108,12 +1108,14 @@ def generate_pdf(saju_data: dict, analysis: dict,
     else:
         # ══ 프리미엄 리포트 흐름 ══
         section_configs = [
-            ("personality",  "타고난 본질과 성격"),
-            ("wealth",       "재물운 상세 분석"),
-            ("career",       "직업·직장운 상세 분석"),
-            ("love",         "연애·결혼운 상세 분석"),
-            ("health",       "건강운 상세 분석"),
-            ("lucky_charm",  "맞춤형 개운 가이드"),
+            ("personality",    "타고난 본질과 성격"),
+            ("wealth",         "재물운 상세 분석"),
+            ("career",         "직업·직장운 상세 분석"),
+            ("love",           "연애·결혼운 상세 분석"),
+            ("relationships",  "인간관계·가족운 상세 분석"),
+            ("health",         "건강운 상세 분석"),
+            ("lucky_charm",    "맞춤형 개운 가이드"),
+            ("lifetime",       "평생 총운"),
         ]
 
         toc_entries = []
