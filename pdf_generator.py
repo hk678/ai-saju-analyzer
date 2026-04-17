@@ -50,11 +50,11 @@ C_CARD_BG     = (255, 255, 255)
 C_CARD_BORDER = (226, 232, 240)
 C_ACCENT      = (74,  85, 104)
 
-C_WOOD  = (47,  133, 90)
-C_FIRE  = (197, 48,  48)
-C_EARTH = (116, 66,  16)
-C_METAL = (113, 128, 150)
-C_WATER = (26,  54,  93)
+C_WOOD  = (129, 199, 132)
+C_FIRE  = (239, 154, 154)
+C_EARTH = (255, 224, 130)
+C_METAL = (238, 238, 238)
+C_WATER = (144, 164, 174)
 
 ELEMENT_COLORS = {
     "목": C_WOOD,  "화": C_FIRE,  "토": C_EARTH,
@@ -165,6 +165,9 @@ class SajuPDF(FPDF):
     def _fill(self, rgb):           self.set_fill_color(*rgb)
     def _stroke(self, rgb):         self.set_draw_color(*rgb)
     def _text_color(self, rgb):     self.set_text_color(*rgb)
+
+    def get_text_color(self, bg):
+        return (90, 90, 90)
 
     def _rounded_rect_v2(self, x, y, w, h, r=4):
         try:
@@ -495,7 +498,7 @@ class SajuPDF(FPDF):
         self.set_font('KR-Light', '', 9)
         self._text_color(C_TEXT_LIGHT)
         self.set_xy(0, 281)
-        self.cell(210, 6, '사주 분석 시스템  ·  Individual Destiny Map', align='C')
+        self.cell(210, 6, '사주 분석 시스템', align='C')
 
     # ══════════════════════════════════════════════════════════════════════════
     # 3. 섹션 페이지 헤더
@@ -727,103 +730,291 @@ class SajuPDF(FPDF):
                 self.ln(9)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 4-B. 기본 리포트용 사주 원국 소개 (도식 + 2~3줄 설명)
+    # 4-B. 사주 원국 (기본/프리미엄 공용)
     # ══════════════════════════════════════════════════════════════════════════
-    def add_basic_saju_intro(self, saju_data: dict):
-        """기본 리포트용: 사주 원국 도식 + 오행 분포 + 2~3줄 간단 설명"""
-        self._start_content_page('사주 원국 소개')
+    def add_saju_intro(self, saju_data: dict):
+        """
+        레이아웃:
+          [상단] 만세력 표 — 시주·일주·월주·연주 4열
+                 행 순서: 라벨 / 십성(천간) / 천간 한자 / 지지 한자 / 십성(지지) / 12운성
+          [하단] 오행 분포 — 세로 나열, 한자 원형 아이콘 + 한글명 + 가로 바 + 레이블(균형/과다/부족)
+        """
+        self._start_content_page('사주 원국')
 
-        pillars  = ['연주', '월주', '일주', '시주']
-        card_w, card_h = 38, 52
-        start_x = 17
-        gap = 4
+        origin   = saju_data['사주원국']
+        sipsung  = saju_data.get('십성', {})
+        i12      = saju_data.get('십이운성', {})
 
-        for i, p in enumerate(pillars):
-            px = start_x + i * (card_w + gap)
-            py = self.get_y()
-            data   = saju_data['사주원국'][p]
-            stem   = data['천간']
-            branch = data['지지']
-            is_day = (p == '일주')
+        # 열 순서: 시주 → 일주 → 월주 → 연주
+        PILLAR_ORDER = ['시주', '일주', '월주', '연주']
+        PILLAR_LABEL = {
+            '시주': '시주',
+            '일주': '일주',
+            '월주': '월주',
+            '연주': '연주',
+        }
+        # 십성 키 매핑 (최상위 십성 dict 기준)
+        SS_GAN = {'시주': '시간', '일주': None,  '월주': '월간', '연주': '연간'}
+        SS_JI  = {'시주': '시지', '일주': '일지', '월주': '월지', '연주': '연지'}
+        # 십이운성 키 매핑
+        I12_KEY = {'시주': '시지', '일주': '일지', '월주': '월지', '연주': '연지'}
+
+        # ── 천간/지지 오행 색상 매핑 ──────────────────────────────────────
+        GAN_COLOR = {
+            '甲': C_WOOD,  '乙': C_WOOD,
+            '丙': C_FIRE,  '丁': C_FIRE,
+            '戊': C_EARTH, '己': C_EARTH,
+            '庚': C_METAL, '辛': C_METAL,
+            '壬': C_WATER, '癸': C_WATER,
+        }
+        JI_COLOR = {
+            '寅': C_WOOD,  '卯': C_WOOD,
+            '巳': C_FIRE,  '午': C_FIRE,
+            '申': C_METAL, '酉': C_METAL,
+            '亥': C_WATER, '子': C_WATER,
+            '辰': C_EARTH, '丑': C_EARTH, '未': C_EARTH, '戌': C_EARTH,
+        }
+
+        # ── 만세력 표 ─────────────────────────────────────────────────────
+        LBL_W  = 28          # 왼쪽 행 라벨 열 너비
+        COL_W  = 40          # 각 주 열 너비
+        GAP    = 2
+        TABLE_W = LBL_W + 4 * COL_W + 4 * GAP
+        TABLE_X = (210 - TABLE_W) / 2
+        TOP_Y   = self.get_y()
+
+        ROW_H_LABEL  = 12    # 주 라벨 행
+        ROW_H_SS     = 14    # 십성 행
+        ROW_H_HANJA  = 22    # 천간·지지 한자 행
+        ROW_H_I12    = 14    # 12운성 행
+
+        def _col_x(ci: int) -> float:
+            return TABLE_X + LBL_W + GAP + ci * (COL_W + GAP)
+
+        # ── 헤더 행: 주 라벨 ─────────────────────────────────────────────
+        cy = TOP_Y
+        # 왼쪽 라벨 셀 (빈칸)
+        self._fill(C_CHARCOAL)
+        self.rect(TABLE_X, cy, LBL_W, ROW_H_LABEL, style='F')
+
+        for ci, pkey in enumerate(PILLAR_ORDER):
+            cx     = _col_x(ci)
+            is_day = (pkey == '일주')
+            # 배경: 모든 열 동일하게 C_CHARCOAL
+            self._fill(C_CHARCOAL)
+            self._stroke(C_CHARCOAL)
+            self.set_line_width(0.2)
+            self.rect(cx, cy, COL_W, ROW_H_LABEL, style='F')   # 배경만 채움(테두리 없음)
 
             if is_day:
-                self._fill(C_CHARCOAL); self._stroke(C_GOLD)
+                # 금색 테두리: 4면 전체
+                self._stroke(C_GOLD)
                 self.set_line_width(1.0)
-            else:
-                self._fill(C_WHITE); self._stroke(C_CARD_BORDER)
-                self.set_line_width(0.3)
-            self._rounded_rect_v2(px, py, card_w, card_h, 4)
+                self.line(cx,           cy,                cx + COL_W, cy)                # 상단
+                self.line(cx,           cy,                cx,          cy + ROW_H_LABEL) # 좌
+                self.line(cx + COL_W,   cy,                cx + COL_W,  cy + ROW_H_LABEL) # 우
+                self.line(cx,           cy + ROW_H_LABEL,  cx + COL_W,  cy + ROW_H_LABEL) # 하단
+                self.set_line_width(0.2)
+
+            self.set_font('KR', '', 13)   # 헤더 라벨 폰트
+            self._text_color(C_GOLD if is_day else (180, 190, 205))
+            self.set_xy(cx, cy + 1.5)
+            self.cell(COL_W, ROW_H_LABEL - 2, PILLAR_LABEL[pkey], align='C')
+
+        cy += ROW_H_LABEL
+
+        # ── 행 그리기 헬퍼 ───────────────────────────────────────────────
+        def _draw_row(row_h: float, row_label: str,
+                      values: list, font_size: float = 9,
+                      bold: bool = False, value_colors: list = None):
+            """
+            row_label    : 왼쪽 라벨
+            values       : 4개 값 리스트 (시·일·월·연 순)
+            value_colors : 각 열 텍스트 색상 (None이면 기본)
+            """
+            nonlocal cy
+            # 왼쪽 라벨 셀
+            self._fill((235, 237, 243))
+            self._stroke(C_CARD_BORDER)
+            self.set_line_width(0.15)
+            self.rect(TABLE_X, cy, LBL_W, row_h, style='FD')
+            self.set_font('KR', '', 13)   # 라벨 폰트
+            self._text_color(C_TEXT_MID)
+            self.set_xy(TABLE_X, cy + (row_h - 11) / 2)
+            self.cell(LBL_W, 11, row_label, align='C')
+
+            for ci, (pkey, val) in enumerate(zip(PILLAR_ORDER, values)):
+                cx     = _col_x(ci)
+                is_day = (pkey == '일주')
+                # 한자 행 여부 판단
+                is_hanja_row = (font_size >= 20)
+
+                # 배경 설정
+                if is_hanja_row and value_colors:
+                    fill_color = value_colors[ci]   # 오행 색을 배경으로
+                else:
+                    fill_color = (245, 246, 250) if ci % 2 == 0 else C_WHITE
+                self._fill(fill_color)
+                self._stroke(C_CARD_BORDER)
+                self.set_line_width(0.15)
+                self.rect(cx, cy, COL_W, row_h, style='FD')
+                self.set_line_width(0.2)
+
+                # 텍스트 색상
+                if is_hanja_row and value_colors:
+                    tc = self.get_text_color(fill_color)
+                else:
+                    tc = C_TEXT_DARK
+                fstyle = 'B' if bold else ''
+                self.set_font('KR', fstyle, font_size)
+                self._text_color(tc)
+                self.set_xy(cx, cy + (row_h - font_size * 0.4) / 2)
+                self.cell(COL_W, font_size * 0.4 + 1, val, align='C')
+
+            cy += row_h
+
+        # 십성(천간) 행
+        ss_gan_vals = [
+            sipsung.get(SS_GAN[p], '일간') if SS_GAN[p] else '일간(나)'
+            for p in PILLAR_ORDER
+        ]
+        _draw_row(ROW_H_SS, '십성\n(천간)', ss_gan_vals, font_size=15)
+
+        # 천간 한자 행 — 오행 색상 적용
+        gan_vals   = [origin[p]['천간'] for p in PILLAR_ORDER]
+        gan_colors = [GAN_COLOR.get(v, C_TEXT_DARK) for v in gan_vals]
+        _draw_row(ROW_H_HANJA, '천  간', gan_vals, font_size=23, bold=True,
+                  value_colors=gan_colors)
+
+        # 지지 한자 행 — 오행 색상 적용
+        ji_vals   = [origin[p]['지지'] for p in PILLAR_ORDER]
+        ji_colors = [JI_COLOR.get(v, C_TEXT_DARK) for v in ji_vals]
+        _draw_row(ROW_H_HANJA, '지  지', ji_vals, font_size=23, bold=True,
+                  value_colors=ji_colors)
+
+        # 십성(지지) 행
+        ss_ji_vals = [sipsung.get(SS_JI[p], '') for p in PILLAR_ORDER]
+        _draw_row(ROW_H_SS, '십성\n(지지)', ss_ji_vals, font_size=15)
+
+        # 12운성 행
+        i12_vals = [i12.get(I12_KEY[p], '-') for p in PILLAR_ORDER]
+        _draw_row(ROW_H_I12, '12운성', i12_vals, font_size=15)
+
+        # 일주 컬럼 전체 테두리
+        day_col_index = 1
+        cx = _col_x(day_col_index)
+
+        table_height = (
+            ROW_H_LABEL +
+            ROW_H_SS +
+            ROW_H_HANJA +
+            ROW_H_HANJA +
+            ROW_H_SS +
+            ROW_H_I12
+        )
+
+        self._stroke(C_GOLD)
+        self.set_line_width(1.2)
+        self.rect(cx, TOP_Y, COL_W, table_height)
+        self.set_line_width(0.2)
+
+        self.set_y(cy + 16)
+
+        # ── 오행 분포 (세로 나열) ─────────────────────────────────────────
+        ELEM_META = [
+            ('목', '木', '나무', C_WOOD),
+            ('화', '火', '불',   C_FIRE),
+            ('토', '土', '흙',   C_EARTH),
+            ('금', '金', '금',   C_METAL),
+            ('수', '水', '물',   C_WATER),
+        ]
+        elements = saju_data.get('오행분포', {})
+        total    = max(sum(elements.values()), 1)
+
+        # 개수 → (상태 레이블, 채우기 비율) 매핑
+        def _elem_status(val: int):
+            if val == 0:   return ('부족', 0.00)
+            elif val == 1: return ('약함', 0.20)
+            elif val == 2: return ('균형', 0.40)
+            elif val == 3: return ('강함', 0.60)
+            elif val == 4: return ('과다', 0.80)
+            else:          return ('극단', 1.00)
+
+        # 섹션 제목
+        self.set_font('KR', 'B', 17)
+        self._text_color(C_CHARCOAL)
+        self.set_x(TABLE_X)
+        self.cell(0, 9, '오행 분포도', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.ln(8)
+
+        ICON_R   = 8      # 원형 아이콘 반지름
+        TABLE_X += 6   # 전체 오른쪽 이동
+        ICON_D   = ICON_R * 2
+        NAME_W   = 16      # 한글명 너비
+        BAR_X0   = TABLE_X + ICON_D + 6 + NAME_W + 3
+        COUNT_W  = 22      # 개수 텍스트 너비
+        BAR_MAXW = (TABLE_X + TABLE_W) - BAR_X0 - COUNT_W - 4
+        ROW_GAP  = 4       # 행 간격
+        ROW_H_E  = ICON_D + ROW_GAP
+
+        for ek, hanja, name_kr, color in ELEM_META:
+            val   = elements.get(ek, 0)
+            status_label, fill_ratio = _elem_status(val)
+            bar_w = int(BAR_MAXW * fill_ratio)
+            ey    = self.get_y()
+
+            # 원형 아이콘
+            self._fill(color)
+            self._stroke(color)
+            self.set_line_width(0)
+            self.ellipse(TABLE_X, ey, ICON_D, ICON_D, style='F')
+            self.set_line_width(0.2)
+            # 아이콘 한자
+            self.set_font('KR', 'B', 15)
+            tc = self.get_text_color(color)
+            self._text_color(tc)
+            self.set_xy(TABLE_X, ey + ICON_R - 6)
+            self.cell(ICON_D, 12, hanja, align='C')
+
+            # 한글 이름
+            self.set_font('KR', '', 15)
+            self._text_color(C_TEXT_DARK)
+            self.set_xy(TABLE_X + ICON_D + 4, ey + ICON_R - 6)
+            self.cell(NAME_W, 12, name_kr)
+
+            # 바 배경 (회색)
+            self._fill((225, 228, 233))
+            self._stroke((225, 228, 233))
+            self.set_line_width(0)
+            self._rounded_rect_v2(BAR_X0, ey + 3, BAR_MAXW, ICON_D - 6, 3)
             self.set_line_width(0.2)
 
-            self.set_font('KR-Light', '', 8)
-            self._text_color(C_GOLD if is_day else C_TEXT_LIGHT)
-            self.set_xy(px, py + 5)
-            self.cell(card_w, 5, p, align='C')
-
-            self.set_font('KR', 'B', 24)
-            self._text_color(C_WHITE if is_day else C_CHARCOAL)
-            self.set_xy(px, py + 12)
-            self.cell(card_w, 14, stem, align='C')
-
-            self._divider(px + 6, py + 26, card_w - 12,
-                          C_GOLD if is_day else C_CARD_BORDER, 0.3)
-
-            self.set_font('KR', 'B', 24)
-            self._text_color(C_WHITE if is_day else C_CHARCOAL)
-            self.set_xy(px, py + 28)
-            self.cell(card_w, 14, branch, align='C')
-
-            if is_day:
-                self.set_font('KR-Light', '', 7)
-                self._text_color(C_GOLD)
-                self.set_xy(px, py + 44)
-                self.cell(card_w, 6, '일주', align='C')
-
-        self.set_y(self.get_y() + card_h + 10)
-
-        # 오행 분포 바
-        elements = saju_data['오행분포']
-        total = max(sum(elements.values()), 1)
-        bar_x = 17
-        ew, eg = 32, 4
-        self.set_font('KR', 'B', 10)
-        self._text_color(C_CHARCOAL)
-        self.set_x(17)
-        self.cell(0, 6, '오행 분포', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        self.ln(1)
-        for ei, ek in enumerate(['목', '화', '토', '금', '수']):
-            val   = elements.get(ek, 0)
-            ex    = bar_x + ei * (ew + eg)
-            ey    = self.get_y()
-            color = ELEMENT_COLORS.get(ek, C_TEXT_MID)
-            self._fill((220, 225, 230))
-            self.rect(ex, ey, ew, 10, style='F')
-            if val > 0:
-                bar_fill_w = int(ew * val / max(total, 8))
+            # 바 채움 (비율 기반)
+            if bar_w > 0:
                 self._fill(color)
-                self.rect(ex, ey, max(bar_fill_w, 3), 10, style='F')
-            self.set_font('KR', 'B', 9)
-            self._text_color(C_WHITE)
-            self.set_xy(ex + 2, ey + 1)
-            self.cell(ew - 4, 8, f'{ek}  {val}')
-        self.set_y(self.get_y() + 18)
+                self._stroke(color)
+                self.set_line_width(0)
+                self._rounded_rect_v2(BAR_X0, ey + 3, bar_w, ICON_D - 6, 3)
+                self.set_line_width(0.2)
 
-        # 2~3줄 핵심 설명
-        ilju     = saju_data['사주원국']['일주']['간지']
-        day_stem = saju_data['일간정보']['일간']
-        elem     = saju_data['일간정보']['오행']
-        strength = _clean_strength(saju_data['일간정보']['신강신약'])
-        shinsal  = ', '.join(saju_data.get('신살', ['없음']))
+            # 상태 레이블
+            self.set_font('KR', 'B', 14)
+            if bar_w > 0:
+                tc = self.get_text_color(color)
+            else:
+                tc = C_TEXT_MID
+            self._text_color(tc)
+            self.set_xy(BAR_X0 + 6, ey + ICON_R - 5.5)
+            self.cell(max(bar_w - 6, 26), 11, status_label)
 
-        desc_lines = [
-            f"일주는 {ilju}으로, 일간 {day_stem}은 {elem} 오행의 에너지를 지닙니다.",
-            f"사주 전체의 강약은 {strength}이며, 원국에 담긴 신살은 {shinsal}입니다.",
-        ]
-        self.set_font('KR', '', 13)
-        self._text_color(C_TEXT_DARK)
-        for line in desc_lines:
-            self.set_x(17)
-            self.multi_cell(176, 14, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            # 개수 (바 오른쪽)
+            self.set_font('KR', '', 15)
+            self._text_color(C_TEXT_MID)
+            self.set_xy(BAR_X0 + BAR_MAXW + 5, ey + ICON_R - 6)
+            self.cell(COUNT_W, 12, f'{val}개')
+
+            self.set_y(ey + ROW_H_E)
+
         self.ln(4)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1085,6 +1276,7 @@ def generate_pdf(saju_data: dict, analysis: dict,
                  chart_paths: dict = None,
                  report_type: str = "premium",
                  target_year: int = None) -> str:
+    # chart_paths는 하위 호환성을 위해 파라미터로 유지하되 사용하지 않음
 
     today = _today_str()
     pdf   = SajuPDF()
@@ -1102,7 +1294,7 @@ def generate_pdf(saju_data: dict, analysis: dict,
     if report_type == "basic":
         # ══ 기본 리포트 흐름 ══
         toc_entries = [
-            ('사주 원국 소개',),
+            ('사주 원국',),
             ('타고난 성격과 기질',),
             ('전반 운세',),
             (f'{year_str} 간략 총평',),
@@ -1111,7 +1303,7 @@ def generate_pdf(saju_data: dict, analysis: dict,
         pdf._section_counter = 0
         pdf._page_num_enabled = True
 
-        pdf.add_basic_saju_intro(saju_data)
+        pdf.add_saju_intro(saju_data)
 
         if analysis.get("personality"):
             pdf.add_analysis_section('타고난 성격과 기질', analysis["personality"])
@@ -1135,7 +1327,7 @@ def generate_pdf(saju_data: dict, analysis: dict,
             ("lifetime",       "평생 총운"),
         ]
 
-        toc_entries = []
+        toc_entries = [('사주 원국',)]
         for key, title in section_configs:
             if analysis.get(key):
                 toc_entries.append((title,))
@@ -1147,6 +1339,8 @@ def generate_pdf(saju_data: dict, analysis: dict,
         pdf.add_toc(toc_entries)
         pdf._section_counter = 0
         pdf._page_num_enabled = True
+
+        pdf.add_saju_intro(saju_data)
 
         for key, title in section_configs:
             content = analysis.get(key, "")

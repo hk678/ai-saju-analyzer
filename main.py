@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(__file__))
 
 from saju_calculator import calculate_saju, get_seun, get_wolun
-from visualizer import draw_element_chart, draw_sipsung_chart, draw_daewun_flow
 from gemini_analyzer import generate_premium_report, generate_basic_report
 from pdf_generator import generate_pdf
 from word_generator import generate_word
@@ -139,30 +138,8 @@ def run_pipeline(user_info: dict, api_key: str):
         print("   이후 단계만 실행하려면 모드 2(PDF 재생성)를 이용하세요.\n")
         return str(out_dir), None
 
-    # ── Step 2: 차트 생성 ───────────────────────────────────────────────────
-    print("\n📊 [2/4] 시각화 차트 생성 중...")
-    chart_paths = {}
-
-    try:
-        chart_paths["elements"] = str(draw_element_chart(saju_data, str(out_dir / "chart_elements.png")))
-        print("  ✅ 오행 분포 차트 완료")
-    except Exception as e:
-        print(f"  ⚠️  오행 차트 오류: {e}")
-
-    try:
-        chart_paths["sipsung"] = str(draw_sipsung_chart(saju_data, str(out_dir / "chart_sipsung.png")))
-        print("  ✅ 십성 분포 차트 완료")
-    except Exception as e:
-        print(f"  ⚠️  십성 차트 오류: {e}")
-
-    try:
-        chart_paths["daewun"] = str(draw_daewun_flow(saju_data, str(out_dir / "chart_daewun.png")))
-        print("  ✅ 대운 흐름 차트 완료")
-    except Exception as e:
-        print(f"  ⚠️  대운 차트 오류: {e}")
-
-    # ── Step 3: AI 분석 ─────────────────────────────────────────────────────
-    print(f"\n🤖 [3/4] AI 분석 생성 중 ({user_info['report_type'].upper()})...")
+    # ── Step 2: AI 분석 ─────────────────────────────────────────────────────
+    print(f"\n🤖 [2/3] AI 분석 생성 중 ({user_info['report_type'].upper()})...")
     if not api_key:
         print("  ⚠️  GEMINI_API_KEY가 없습니다. 샘플 텍스트로 대체합니다.")
         analysis = _get_sample_analysis(saju_data)
@@ -179,8 +156,8 @@ def run_pipeline(user_info: dict, api_key: str):
     with open(out_dir / "analysis.json", "w", encoding="utf-8") as f:
         json.dump(analysis, f, ensure_ascii=False, indent=2)
 
-    # ── Step 4: 문서 생성 ──────────────────────────────────────────────────
-    print("\n📄 [4/4] 문서 생성 중...")
+    # ── Step 3: 문서 생성 ──────────────────────────────────────────────────
+    print("\n📄 [3/3] 문서 생성 중...")
 
     # Word 생성
     # word_path = str(out_dir / f"사주리포트_{user_info['name']}.docx")
@@ -197,8 +174,8 @@ def run_pipeline(user_info: dict, api_key: str):
     prefix = "[기본]" if user_info["report_type"] == "basic" else "[프리미엄]"
     pdf_path = str(out_dir / f"{prefix} 사주리포트_{user_info['name']}님.pdf")
     try:
-        generate_pdf(saju_data, analysis, pdf_path, chart_paths,
-                    user_info["report_type"], target_year)
+        generate_pdf(saju_data, analysis, pdf_path,
+                    report_type=user_info["report_type"], target_year=target_year)
     except Exception as e:
         print(f"  ⚠️  PDF 생성 오류: {e}")
         import traceback; traceback.print_exc()
@@ -238,7 +215,7 @@ def regenerate_docu_only(out_dir: str, report_type: str = "basic"):
     # PDF 재생성
     pdf_path = str(out_dir / f"{prefix} 사주리포트_{name}님.pdf")
     try:
-        generate_pdf(saju_data, analysis, pdf_path, chart_paths, report_type, target_year)
+        generate_pdf(saju_data, analysis, pdf_path, report_type=report_type, target_year=target_year)
         print(f"✅ PDF 재생성 완료: {pdf_path}")
     except Exception as e:
         print(f"❌ PDF 생성 실패: {e}")
