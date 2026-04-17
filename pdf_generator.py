@@ -140,6 +140,7 @@ class SajuPDF(FPDF):
         self._register_fonts()
         self.set_margins(0, 0, 0)
         self._page_num_enabled = False
+        self._section_counter = 0
         self._current_section_title = ''
 
     def _register_fonts(self):
@@ -202,7 +203,11 @@ class SajuPDF(FPDF):
             self._fill(C_OFFWHITE)
             self.rect(0, 0, 210, 297, style='F')
             if self._current_section_title:
-                self._draw_section_header(self._current_section_title)
+                # 연속 페이지: 번호 카운트 없이 현재 번호 재사용
+                self._draw_section_header(
+                    self._current_section_title,
+                    section_num=self._section_counter
+                )
             self.set_left_margin(x)
             self.set_right_margin(210 - x - width)
 
@@ -495,27 +500,32 @@ class SajuPDF(FPDF):
     # ══════════════════════════════════════════════════════════════════════════
     # 3. 섹션 페이지 헤더
     # ══════════════════════════════════════════════════════════════════════════
-    def _draw_section_header(self, section_title: str):
+    def _draw_section_header(self, section_title: str, section_num: int = 0):
         self._fill(C_CHARCOAL)
         self.rect(0, 0, 210, 28, style='F')
         self._fill(C_GOLD)
         self.rect(0, 28, 210, 1.5, style='F')
+        display_title = f"{section_num}. {section_title}" if section_num > 0 else section_title
         self.set_font('KR', 'B', 16)
         self._text_color(C_WHITE)
         self.set_xy(20, 9)
-        self.cell(150, 10, section_title)
+        self.cell(150, 10, display_title)
         self.set_font('KR-Light', '', 14)
         self._text_color(C_GOLD)
         self.set_xy(150, 10)
         self.cell(40, 8, '사주 분석', align='R')
         self.set_y(45)
 
-    def _start_content_page(self, section_title: str):
+    def _start_content_page(self, section_title: str, auto_number: bool = True):
         self._current_section_title = section_title
+        if auto_number:
+            self._section_counter += 1
         self.add_page()
         self._fill(C_OFFWHITE)
         self.rect(0, 0, 210, 297, style='F')
-        self._draw_section_header(section_title)
+        self._draw_section_header(section_title, section_num=self._section_counter)
+        self.set_left_margin(20)
+        self.set_right_margin(20)
 
     # ══════════════════════════════════════════════════════════════════════════
     # 4-A. 사주 원국 페이지 (프리미엄용 전체 데이터)
@@ -965,11 +975,14 @@ class SajuPDF(FPDF):
     def add_monthly_section(self, monthly: dict, target_year: int = None):
         year_str = f"{target_year}년 " if target_year else "올해 "
         month_names = ['1월','2월','3월','4월','5월','6월',
-                       '7월','8월','9월','10월','11월','12월']
+                    '7월','8월','9월','10월','11월','12월']
 
+        first = True
         for month_key, content in monthly.items():
             mn = month_names[int(month_key) - 1]
-            self._start_content_page(f'{year_str}{mn} 운세')
+            # 첫 월만 번호 증가, 이후 월은 같은 번호 유지
+            self._start_content_page(f'{year_str}{mn} 운세', auto_number=first)
+            first = False
             self._render_markdown(content, x=20, width=170)
             self.ln(4)
             
@@ -977,8 +990,11 @@ class SajuPDF(FPDF):
     # 9. 향후 10년 연간 운세 — 연도별 반드시 새 페이지
     # ══════════════════════════════════════════════════════════════════════════
     def add_yearly_section(self, yearly: dict):
+        first = True
         for year_key, content in yearly.items():
-            self._start_content_page(f'{year_key}년 연간 운세')
+            # 첫 연도만 번호 증가, 이후 연도는 같은 번호 유지
+            self._start_content_page(f'{year_key}년 연간 운세', auto_number=first)
+            first = False
             self._render_markdown(content, x=20, width=170)
             self.ln(4)
 
@@ -1092,6 +1108,7 @@ def generate_pdf(saju_data: dict, analysis: dict,
             (f'{year_str} 간략 총평',),
         ]
         pdf.add_toc(toc_entries)
+        pdf._section_counter = 0
         pdf._page_num_enabled = True
 
         pdf.add_basic_saju_intro(saju_data)
@@ -1128,6 +1145,7 @@ def generate_pdf(saju_data: dict, analysis: dict,
             toc_entries.append(('향후 10년 연간 운세',))
 
         pdf.add_toc(toc_entries)
+        pdf._section_counter = 0
         pdf._page_num_enabled = True
 
         for key, title in section_configs:
