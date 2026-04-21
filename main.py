@@ -1,10 +1,5 @@
 """
 AI 사주 리포트 자동화 시스템 - 메인 실행 파일
-사용법:
-    python main.py
-    또는 API 키를 환경변수로 설정:
-    export GEMINI_API_KEY=""
-    python main.py
 """
 
 import os
@@ -88,7 +83,7 @@ def _attach_seun_wolun(saju_data: dict, target_year: int, seun_years: int = 10) 
     return saju_data
 
 
-def run_pipeline(user_info: dict, api_key: str):
+def run_pipeline(user_info: dict, api_keys_str: str):
     """전체 파이프라인 실행"""
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -140,15 +135,15 @@ def run_pipeline(user_info: dict, api_key: str):
 
     # ── Step 2: AI 분석 ─────────────────────────────────────────────────────
     print(f"\n🤖 [2/3] AI 분석 생성 중 ({user_info['report_type'].upper()})...")
-    if not api_key:
-        print("  ⚠️  GEMINI_API_KEY가 없습니다. 샘플 텍스트로 대체합니다.")
+    if not api_keys_str:
+        print("  ⚠️  GEMINI_API_KEYS가 없습니다. 샘플 텍스트로 대체합니다.")
         analysis = _get_sample_analysis(saju_data)
     else:
         try:
             if user_info["report_type"] == "premium":
-                analysis = generate_premium_report(api_key, saju_data, target_year)
+                analysis = generate_premium_report(api_keys_str, saju_data, target_year)
             else:
-                analysis = generate_basic_report(api_key, saju_data, target_year)
+                analysis = generate_basic_report(api_keys_str, saju_data, target_year)
         except Exception as e:
             print(f"  ⚠️  AI 분석 오류: {e}")
             analysis = _get_sample_analysis(saju_data)
@@ -270,11 +265,12 @@ if __name__ == "__main__":
         regenerate_docu_only(path, rtype)
         exit()
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
-        print("\n⚠️  GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
+    api_keys_str = os.environ.get("GEMINI_API_KEYS", "")
+    if not api_keys_str:
+        print("\n⚠️  GEMINI_API_KEYS 환경변수가 설정되지 않았습니다.")
         print("   AI 분석 없이 샘플 PDF만 생성합니다.\n")
-        api_key = input("   Gemini API 키를 입력하세요 (없으면 엔터): ").strip()
+        manual = input("   Gemini API 키를 콤마로 구분해 입력하세요 (없으면 엔터): ").strip()
+        api_keys_str = manual
 
     user_info = get_user_input()
-    run_pipeline(user_info, api_key)
+    run_pipeline(user_info, api_keys_str)
