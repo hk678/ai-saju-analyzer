@@ -382,10 +382,17 @@ def get_day_pillar(year: int, month: int, day: int) -> tuple:
 
 
 def get_hour_pillar(day_stem: str, hour: int, minute: int = 0) -> tuple:
-    if hour == 23:
-        branch_idx = 11
-    else:
-        branch_idx = (hour * 60 + minute + 60) // 120 % 12
+    # 1. 전체 분 계산
+    total_min = hour * 60 + minute
+
+    # 2. 한국 경도 보정 (자시 시작 = 23:30 기준)
+    # 23:30 ~ 01:29 → 자시(子時, index 0)
+    # 01:30 ~ 03:29 → 축시(丑時, index 1)  ...
+    # 21:30 ~ 23:29 → 해시(亥時, index 11)
+    offset     = (total_min - 23 * 60 - 30 + 1440) % 1440
+    branch_idx = offset // 120
+
+    # 3. 기존의 시두법 공식 유지
     day_stem_idx = STEMS.index(day_stem)
     stem_idx     = ((day_stem_idx % 5 * 2) + branch_idx) % 10
     return STEMS[stem_idx], BRANCHES[branch_idx]
