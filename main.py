@@ -16,6 +16,7 @@ from saju_calculator import calculate_saju, get_seun, get_wolun
 from gemini_analyzer import generate_premium_report, generate_basic_report
 from pdf_generator import generate_pdf
 from word_generator import generate_word
+from html_generator import generate_html
 
 
 def get_user_input() -> dict:
@@ -205,6 +206,15 @@ def regenerate_docu_only(out_dir: str, report_type: str = "basic"):
     #     print(f"✅ Word 재생성 완료: {word_path}")
     # except Exception as e:
     #     print(f"❌ Word 생성 실패: {e}")
+    #     import traceback; traceback.print_exc()
+
+    # html 재생성
+    # html_path = str(out_dir / f"{prefix} 사주리포트_{name}님.html")
+    # try:
+    #     generate_html(saju_data, analysis, html_path, report_type=report_type, target_year=target_year)
+    #     print(f"✅ html 재생성 완료: {html_path}")
+    # except Exception as e:
+    #     print(f"❌ html 생성 실패: {e}")
     #     import traceback; traceback.print_exc()
 
     # PDF 재생성
