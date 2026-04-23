@@ -122,10 +122,10 @@ class SajuPDF(FPDF):
         self._current_section_title = ''
 
     def _register_fonts(self):
-        self.add_font('KR',       '',  os.path.join(FONT_DIR, 'NanumGothic.ttf'))
-        self.add_font('KR',       'B', os.path.join(FONT_DIR, 'NanumGothicBold.ttf'))
-        self.add_font('KR-Light', '',  os.path.join(FONT_DIR, 'NanumGothicLight.ttf'))
-        self.add_font('KR-Med',   '',  os.path.join(FONT_DIR, 'NanumGothic.ttf'))
+        self.add_font('KR',       '',  os.path.join(FONT_DIR, 'NotoSansKR-Regular.ttf'))
+        self.add_font('KR',       'B', os.path.join(FONT_DIR, 'NotoSansKR-Bold.ttf'))
+        self.add_font('KR-Light', '',  os.path.join(FONT_DIR, 'NotoSansKR-Light.ttf'))
+        self.add_font('KR-Med',   '',  os.path.join(FONT_DIR, 'NotoSansKR-Regular.ttf'))
 
     def header(self): pass
 
@@ -172,7 +172,7 @@ class SajuPDF(FPDF):
 
     # ── 마크다운 렌더러 ───────────────────────────────────────────────────────
     def _render_markdown(self, text: str, x=20, width=170, line_h=15):
-        PAGE_BOTTOM  = 235
+        PAGE_BOTTOM  = 250
         CHARS_PER_LINE = 33
 
         blocks = parse_markdown_blocks(text)
@@ -233,9 +233,9 @@ class SajuPDF(FPDF):
                 return max(1, total)
 
             def _split_to_fit(s: str, avail_lines: int):
-                sentence_ends = [i + 1 for i, ch in enumerate(s) if ch in '.。!！?？']
+                sentence_ends = [i + 1 for i, ch in enumerate(s) if ch == '.']
                 if not sentence_ends:
-                    return s, ''
+                    return '', s
                 best_cut = None
                 for end_idx in sentence_ends:
                     chunk = s[:end_idx]
@@ -244,7 +244,8 @@ class SajuPDF(FPDF):
                     else:
                         break
                 if best_cut is None:
-                    best_cut = sentence_ends[0]
+                    # 현재 페이지에 아무것도 들어가지 않으면 새 페이지로 전부 넘김
+                    return '', s
                 return s[:best_cut], s[best_cut:].lstrip()
 
             remaining = full_text
@@ -256,6 +257,12 @@ class SajuPDF(FPDF):
                     remaining = ''
                 else:
                     chunk, remaining = _split_to_fit(remaining, avail_lines)
+
+                # chunk가 비어 있으면 현재 페이지에 공간이 없다는 뜻 → 새 페이지로
+                if not chunk:
+                    _new_content_page_tracked()
+                    _just_broke_page[0] = False
+                    continue
 
                 self.set_font('KR', '', 18)
                 self._text_color(C_TEXT_DARK)
@@ -297,7 +304,9 @@ class SajuPDF(FPDF):
             elif btype == 'h2':
                 content = strip_markdown(content)
                 lines = _estimate_lines(content, 25)
-                _ensure_space(5 + lines * line_h + 3)
+                # h2 자체 높이 + 본문 최소 2줄을 함께 확보
+                # → h2가 페이지 맨 아래 달랑 혼자 남는 상황 방지
+                _ensure_space(5 + lines * line_h + 3 + line_h * 2)
                 self.ln(5)
                 self._fill(C_GOLD)
                 self.rect(x, self.get_y() + 2, 4, line_h - 4, style='F')

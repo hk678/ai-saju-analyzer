@@ -44,8 +44,6 @@ fonts/
 *.tmp
 *.swp
 app.py
-word_generator.py
-html_generator.py
 
 # Local data / knowledge base
 db_knowledge.json

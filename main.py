@@ -15,8 +15,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 from saju_calculator import calculate_saju, get_seun, get_wolun
 from gemini_analyzer import generate_premium_report, generate_basic_report
 from pdf_generator import generate_pdf
-from word_generator import generate_word
-from html_generator import generate_html
 
 
 def get_user_input() -> dict:
@@ -155,17 +153,6 @@ def run_pipeline(user_info: dict, api_keys_str: str):
     # ── Step 3: 문서 생성 ──────────────────────────────────────────────────
     print("\n📄 [3/3] 문서 생성 중...")
 
-    # Word 생성
-    # word_path = str(out_dir / f"사주리포트_{user_info['name']}.docx")
-    # try:
-    #     generate_word(saju_data, analysis, word_path,
-    #                 user_info["report_type"], target_year)
-    # except Exception as e:
-    #     print(f"  ⚠️  Word 생성 오류: {e}")
-    #     import traceback; traceback.print_exc()
-    
-    # return str(out_dir), word_path
-
     # PDF 생성
     prefix = "[기본]" if user_info["report_type"] == "basic" else "[프리미엄]"
     pdf_path = str(out_dir / f"{prefix} 사주리포트_{user_info['name']}님.pdf")
@@ -198,24 +185,6 @@ def regenerate_docu_only(out_dir: str, report_type: str = "basic"):
     name = saju_data['기본정보']['이름']
     seun_list   = saju_data.get("세운", [])
     target_year = seun_list[0]["연도"] if seun_list else datetime.now().year
-
-    # Word 재생성
-    # word_path = str(out_dir / f"사주리포트_{name}.docx")
-    # try:
-    #     generate_word(saju_data, analysis, word_path, "basic", target_year)
-    #     print(f"✅ Word 재생성 완료: {word_path}")
-    # except Exception as e:
-    #     print(f"❌ Word 생성 실패: {e}")
-    #     import traceback; traceback.print_exc()
-
-    # html 재생성
-    # html_path = str(out_dir / f"{prefix} 사주리포트_{name}님.html")
-    # try:
-    #     generate_html(saju_data, analysis, html_path, report_type=report_type, target_year=target_year)
-    #     print(f"✅ html 재생성 완료: {html_path}")
-    # except Exception as e:
-    #     print(f"❌ html 생성 실패: {e}")
-    #     import traceback; traceback.print_exc()
 
     # PDF 재생성
     pdf_path = str(out_dir / f"{prefix} 사주리포트_{name}님.pdf")
