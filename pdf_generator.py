@@ -55,6 +55,7 @@ def strip_markdown(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
     text = re.sub(r'\*(.+?)\*',     r'\1', text)
     text = re.sub(r'^#{1,6}\s+',    '',    text, flags=re.MULTILINE)
+    text = text.replace('\n', ' ').replace('\r', '')
     return text.strip()
 
 
@@ -120,6 +121,7 @@ class SajuPDF(FPDF):
         self._page_num_enabled = False
         self._section_counter = 0
         self._current_section_title = ''
+        self._toc_page = 0  # 목차 페이지 번호 (이 페이지까지는 번호 표시 안 함)
 
     def _register_fonts(self):
         self.add_font('KR',       '',  os.path.join(FONT_DIR, 'NotoSansKR-Regular.ttf'))
@@ -132,12 +134,12 @@ class SajuPDF(FPDF):
     def footer(self):
         if not self._page_num_enabled:
             return
-        if self.page <= 2:
+        if self.page <= self._toc_page:
             return
         self.set_y(-14)
         self.set_font('KR-Light', '', 9)
         self.set_text_color(*C_TEXT_LIGHT)
-        self.cell(0, 8, f'- {self.page - 2} -', align='C')
+        self.cell(0, 8, f'- {self.page - self._toc_page} -', align='C')
 
     # ── 헬퍼 ──────────────────────────────────────────────────────────────────
     def _fill(self, rgb):           self.set_fill_color(*rgb)
@@ -212,6 +214,8 @@ class SajuPDF(FPDF):
 
         def _draw_text_flowing(full_text: str, is_bullet: bool = False):
             _just_broke_page[0] = False
+            # \n이 multi_cell에 넘어가면 폰트 missing glyph 경고 발생 → 공백으로 치환
+            full_text = full_text.replace('\n', ' ').replace('\r', '').strip()
             self.set_font('KR', '', 18)
             text_w = (width - 8) if is_bullet else width
 
@@ -439,6 +443,7 @@ class SajuPDF(FPDF):
     # ══════════════════════════════════════════════════════════════════════════
     def add_toc(self, toc_entries: list):
         self.add_page()
+        self._toc_page = self.page  # 목차 페이지 번호 기록
         self._fill(C_OFFWHITE)
         self.rect(0, 0, 210, 297, style='F')
 
@@ -521,7 +526,14 @@ class SajuPDF(FPDF):
     # 4-A. 사주 원국 페이지 (프리미엄용 전체 데이터)
     # ══════════════════════════════════════════════════════════════════════════
     def add_saju_chart(self, saju_data: dict):
-        self._start_content_page('사주 원국 및 기본 데이터')
+        # 사주 원국은 목차 앞에 위치하므로 번호 없이 표시
+        self._current_section_title = '사주 원국 및 기본 데이터'
+        self.add_page()
+        self._fill(C_OFFWHITE)
+        self.rect(0, 0, 210, 297, style='F')
+        self._draw_section_header('사주 원국 및 기본 데이터', section_num=0)
+        self.set_left_margin(20)
+        self.set_right_margin(20)
 
         pillars  = ['연주', '월주', '일주', '시주']
         card_w, card_h = 38, 52
@@ -657,7 +669,7 @@ class SajuPDF(FPDF):
 
         if '대운' in saju_data:
             if self.get_y() > 220:
-                self._start_content_page('사주 원국 및 기본 데이터')
+                self._start_content_page('사주 원국 및 기본 데이터', auto_number=False)
 
             self.set_font('KR', 'B', 11)
             self._text_color(C_CHARCOAL)
@@ -682,7 +694,7 @@ class SajuPDF(FPDF):
             for di, d in enumerate(saju_data['대운'][:8]):
                 ry = self.get_y()
                 if ry > 268:
-                    self._start_content_page('사주 원국 및 기본 데이터')
+                    self._start_content_page('사주 원국 및 기본 데이터', auto_number=False)
                     ry = self.get_y()
                 bg = (248, 248, 252) if di % 2 == 0 else C_WHITE
                 self._fill(bg); self._stroke(C_CARD_BORDER)
@@ -726,7 +738,14 @@ class SajuPDF(FPDF):
                  행 순서: 라벨 / 십성(천간) / 천간 한자 / 지지 한자 / 십성(지지) / 12운성
           [하단] 오행 분포 — 세로 나열, 한자 원형 아이콘 + 한글명 + 가로 바 + 레이블(균형/과다/부족)
         """
-        self._start_content_page('사주 원국')
+        # 사주 원국은 목차 앞에 위치하므로 번호 없이 표시
+        self._current_section_title = '사주 원국'
+        self.add_page()
+        self._fill(C_OFFWHITE)
+        self.rect(0, 0, 210, 297, style='F')
+        self._draw_section_header('사주 원국', section_num=0)
+        self.set_left_margin(20)
+        self.set_right_margin(20)
 
         origin   = saju_data['사주원국']
         sipsung  = saju_data.get('십성', {})
@@ -827,8 +846,17 @@ class SajuPDF(FPDF):
             self.rect(TABLE_X, cy, LBL_W, row_h, style='FD')
             self.set_font('KR', '', 13)   # 라벨 폰트
             self._text_color(C_TEXT_MID)
-            self.set_xy(TABLE_X, cy + (row_h - 11) / 2)
-            self.cell(LBL_W, 11, row_label, align='C')
+            label_parts = row_label.split('\n')
+            if len(label_parts) == 2:
+                line_h_label = 7
+                start_y = cy + (row_h - line_h_label * 2) / 2
+                self.set_xy(TABLE_X, start_y)
+                self.cell(LBL_W, line_h_label, label_parts[0], align='C')
+                self.set_xy(TABLE_X, start_y + line_h_label)
+                self.cell(LBL_W, line_h_label, label_parts[1], align='C')
+            else:
+                self.set_xy(TABLE_X, cy + (row_h - 11) / 2)
+                self.cell(LBL_W, 11, row_label, align='C')
 
             for ci, (pkey, val) in enumerate(zip(PILLAR_ORDER, values)):
                 cx     = _col_x(ci)
@@ -1281,16 +1309,15 @@ def generate_pdf(saju_data: dict, analysis: dict,
     if report_type == "basic":
         # ══ 기본 리포트 흐름 ══
         toc_entries = [
-            ('사주 원국',),
             ('타고난 성격과 기질',),
             ('전반 운세',),
             (f'{year_str} 간략 총평',),
         ]
+
+        pdf.add_saju_intro(saju_data)
         pdf.add_toc(toc_entries)
         pdf._section_counter = 0
         pdf._page_num_enabled = True
-
-        pdf.add_saju_intro(saju_data)
 
         if analysis.get("personality"):
             pdf.add_analysis_section('타고난 성격과 기질', analysis["personality"])
@@ -1311,10 +1338,10 @@ def generate_pdf(saju_data: dict, analysis: dict,
             ("relationships",  "인간관계·가족운 상세 분석"),
             ("health",         "건강운 상세 분석"),
             ("lucky_charm",    "맞춤형 개운 가이드"),
-            ("lifetime",       "평생 총운"),
+            ("fortune_peaks",  "인생의 상승기와 저운의 시기"),
         ]
 
-        toc_entries = [('사주 원국',)]
+        toc_entries = []
         for key, title in section_configs:
             if analysis.get(key):
                 toc_entries.append((title,))
@@ -1323,11 +1350,10 @@ def generate_pdf(saju_data: dict, analysis: dict,
         if analysis.get("yearly"):
             toc_entries.append(('향후 10년 연간 운세',))
 
+        pdf.add_saju_intro(saju_data)
         pdf.add_toc(toc_entries)
         pdf._section_counter = 0
         pdf._page_num_enabled = True
-
-        pdf.add_saju_intro(saju_data)
 
         for key, title in section_configs:
             content = analysis.get(key, "")

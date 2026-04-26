@@ -337,12 +337,31 @@ def _pillar_str(pillar: dict) -> str:
             f"12운성:{un} / 신살:{sal})")
 
 
-def _build_origin_context(saju_data: dict) -> str:
-    """사주원국 전체 컨텍스트 문자열 (프롬프트 공통 삽입용)"""
+def _current_year_from_saju(saju_data: dict) -> int:
+    """saju_data의 세운 첫 연도를 현재 연도로 사용 (대운 강조용)"""
+    seun_list = saju_data.get("세운", [])
+    if seun_list:
+        return seun_list[0]["연도"]
+    return datetime.now().year
+
+
+def _build_origin_context(saju_data: dict, current_year: int = None) -> str:
+    """사주원국 전체 컨텍스트 문자열 (프롬프트 공통 삽입용)
+    current_year: 전달 시 현재 대운을 ★현재대운★ 으로 강조 표시함
+    """
     ori = saju_data["사주원국"]
     twelve = saju_data.get("십이운성", {})
     sipsung = saju_data.get("십성", {})
     shinsal_list = saju_data.get("신살", [])
+
+    # 현재 나이 계산 (current_year 전달 시)
+    current_age = None
+    if current_year:
+        try:
+            birth_year = int(saju_data['기본정보']['생년월일'][:4])
+            current_age = current_year - birth_year
+        except Exception:
+            pass
 
     lines = [
         f"사주원국: 연주 {ori['연주']['간지']}  월주 {ori['월주']['간지']}  일주 {ori['일주']['간지']}  시주 {ori['시주']['간지']}",
@@ -355,16 +374,22 @@ def _build_origin_context(saju_data: dict) -> str:
         f"대운수: {saju_data.get('대운수', '-')}세 시작",
     ]
 
-    # 대운 흐름 요약
+    # 대운 흐름 요약 (현재 대운 강조)
     daewun = saju_data.get("대운", [])
     if daewun:
         dw_lines = []
-        for d in daewun:
+        for i, d in enumerate(daewun):
             gan = d["간지"]["천간"]
             ji  = d["간지"]["지지"]
             sal = "/".join(d["지지"]["신살"]) if d["지지"]["신살"] else "-"
+            next_age = daewun[i+1]["시작나이"] if i+1 < len(daewun) else d["시작나이"] + 10
+            is_current = (
+                current_age is not None
+                and d["시작나이"] <= current_age < next_age
+            )
+            marker = " ★현재대운★" if is_current else ""
             dw_lines.append(
-                f"  {d['시작나이']}세~: {gan}{ji} "
+                f"  {d['시작나이']}세~{next_age-1}세: {gan}{ji}{marker} "
                 f"(천간십성:{d['천간']['십성']['값']} / "
                 f"지지십성:{d['지지']['십성']['값']} / "
                 f"12운성:{d['지지']['12운성']} / 신살:{sal})"
@@ -386,7 +411,7 @@ def analyze_personality(pool, saju_data: dict, db: dict) -> str:
     stem_info   = db.get("천간", {}).get(day_stem, {})
     branch_info = db.get("지지", {}).get(day_branch, {})
 
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     prompt = f"""
 [분석 대상 사주 데이터]
@@ -435,7 +460,7 @@ def analyze_personality(pool, saju_data: dict, db: dict) -> str:
 def analyze_wealth(pool, saju_data: dict, db: dict) -> str:
     """섹션 2: 재물운 분석 (A4 2.5장 이상)"""
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     sipsung_db_jae = db.get("십성", {})
     jae_ref = {
@@ -474,7 +499,7 @@ def analyze_wealth(pool, saju_data: dict, db: dict) -> str:
 def analyze_career(pool, saju_data: dict, db: dict) -> str:
     """섹션 3: 직업/직장운 분석 (A4 2.5장 이상)"""
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     prompt = f"""
 [사주 데이터]
@@ -507,7 +532,7 @@ def analyze_love(pool, saju_data: dict, db: dict) -> str:
     """섹션 4: 연애/결혼운 분석 (A4 2.5장 이상)"""
     full_name  = saju_data['기본정보']['이름']
     gender     = saju_data['기본정보']['성별']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     prompt = f"""
 [사주 데이터]
@@ -539,7 +564,7 @@ def analyze_love(pool, saju_data: dict, db: dict) -> str:
 def analyze_health(pool, saju_data: dict, db: dict) -> str:
     """섹션 5: 건강운 분석 (A4 2장 이상)"""
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     prompt = f"""
 [사주 데이터]
@@ -568,7 +593,7 @@ def analyze_health(pool, saju_data: dict, db: dict) -> str:
 def analyze_lucky_charm(pool, saju_data: dict, db: dict) -> str:
     """섹션 6: 맞춤형 개운 가이드 (A4 2.5장 이상)"""
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     prompt = f"""
 [사주 데이터]
@@ -600,7 +625,7 @@ def analyze_lucky_charm(pool, saju_data: dict, db: dict) -> str:
 def analyze_relationships(pool, saju_data: dict, db: dict) -> str:
     """섹션 7: 인간관계·가족운 상세 분석 (A4 2.5장 이상)"""
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     prompt = f"""
 [사주 데이터]
@@ -630,17 +655,16 @@ def analyze_relationships(pool, saju_data: dict, db: dict) -> str:
     return _checked_call(pool, prompt)
 
 
-def analyze_lifetime(pool, saju_data: dict, db: dict) -> str:
-    """섹션 8: 평생 총운 (대운 기준, 1,200자 이내)"""
+def analyze_fortune_peaks(pool, saju_data: dict, db: dict) -> str:
+    """섹션 8: 인생의 상승기와 저운의 시기 (대운 기준, 1,400자 이내)"""
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
-    # 대운 목록을 프롬프트용 문자열로 구성
     daewun_list = saju_data.get("대운", [])
     daewun_lines = []
     for i, dw in enumerate(daewun_list):
-        gan  = dw["간지"]["천간"]
-        ji   = dw["간지"]["지지"]
+        gan    = dw["간지"]["천간"]
+        ji     = dw["간지"]["지지"]
         gan_ss = dw["천간"]["십성"]["값"]
         ji_ss  = dw["지지"]["십성"]["값"]
         ji_12  = dw["지지"]["12운성"]
@@ -662,25 +686,32 @@ def analyze_lifetime(pool, saju_data: dict, db: dict) -> str:
 {daewun_ctx}
 
 [작성 요청]
-위 대운 목록을 기준으로 '{full_name} 님'의 평생 총운을 작성하세요.
-※ 반드시 1,200자 이내로 작성할 것 (초과 엄금)
+위 대운 데이터를 분석하여 '{full_name} 님'의 '인생의 상승기와 저운의 시기'를 작성하세요.
+※ 반드시 1,400자 이내로 작성할 것 (초과 엄금)
 ※ 인사말·본인 소개 없이 ## 소제목으로 바로 시작할 것
-※ 각 대운을 ## 소제목으로 구성할 것 (예: ## 3세~12세 갑자 대운)
 ※ 소제목에 번호(1. 2. 3. 등)를 절대 붙이지 말 것
 ※ 의뢰인 호칭은 반드시 '{full_name} 님'으로만 표기할 것 (성 생략 금지)
-※ 각 대운당 3~5줄(150자 내외)로 간결하게 서술할 것
 
 ※ 영어 단어 사용을 금지하고, 반드시 한국어 표현으로 풀어 쓸 것
 ※ 외래어 사용 시에도 한글 표현을 우선하며, 불가피한 경우에도 괄호 속 영어 병기는 금지
 
-각 대운마다 아래 내용을 자연스럽게 녹여 서술할 것 (항목 제목 표기 금지):
-- 주된 운의 색깔과 잘 풀리는/막히는 분야
-- 재물·직업·인간관계·연애의 흐름
-- 건강 주의 포인트
-- 인생 방향이 바뀌는 전환점 여부
+반드시 아래 ## 소제목 구조로 작성할 것:
+
+## 인생 전체 흐름 한눈에 보기
+- 대운 전체를 조망하여 이 사주가 전반적으로 어떤 인생 곡선을 그리는지 3~4줄로 서술
+
+## 인생의 상승기
+- 가장 강하게 운이 상승하는 대운 구간들을 구체적 나이와 간지를 명시하여 서술
+- 각 상승기마다: 왜 좋은 운인지 (십성·12운성 근거), 어떤 분야가 잘 풀리는지, 어떻게 활용해야 하는지
+
+## 저운의 시기
+- 가장 조심해야 할 대운 구간들을 구체적 나이와 간지를 명시하여 서술
+- 각 저운마다: 왜 힘든 운인지 (십성·12운성·신살 근거), 어떤 분야를 조심해야 하는지, 어떻게 대비해야 하는지
+
+## 인생의 전환점
+- 운의 흐름이 크게 바뀌는 대운 전환 시기를 명시하고, 그 시기에 특별히 중요한 결정이나 준비 사항 서술
 """
     return _checked_call(pool, prompt)
-
 
 def analyze_monthly_fortune(pool, saju_data: dict, wolun: dict) -> str:
     """
@@ -703,7 +734,7 @@ def analyze_monthly_fortune(pool, saju_data: dict, wolun: dict) -> str:
                    "7월","8월","9월","10월","11월","12월"]
 
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, year)
 
     # 해당 연도의 세운 데이터 찾기
     seun_for_year = next(
@@ -768,14 +799,17 @@ def analyze_yearly_fortune(pool, saju_data: dict, seun: dict) -> str:
     ji_12     = seun["지지"]["12운성"]
     ji_sal    = "/".join(seun["지지"]["신살"]) if seun["지지"]["신살"] else "없음"
 
-    birth_year_str = saju_data['기본정보']['생년월일'][:4]
+    birth_date_str = saju_data['기본정보']['생년월일']  # "1995년 12월 13일 23시 16분" 형식
     try:
-        current_age = year - int(birth_year_str) + 1
+        import re as _re
+        nums = _re.findall(r'\d+', birth_date_str)  # ['1995', '12', '13', '23', '16']
+        birth_year = int(nums[0])
+        current_age = year - birth_year
     except Exception:
-        current_age = "??"
+        current_age = 0  # 비교 오류 방지용 기본값
 
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, year)
 
     # 해당 연도의 현재 대운 찾기
     current_daewun_str = ""
@@ -786,11 +820,13 @@ def analyze_yearly_fortune(pool, saju_data: dict, seun: dict) -> str:
             dw_gan = dw["간지"]["천간"]
             dw_ji  = dw["간지"]["지지"]
             current_daewun_str = (
-                f"현재 대운: {dw_gan}{dw_ji} "
+                f"※ 현재 대운 ({current_age}세, {dw['시작나이']}세~{next_age-1}세 구간): "
+                f"{dw_gan}{dw_ji} 대운 "
                 f"(천간십성:{dw['천간']['십성']['값']} / "
                 f"지지십성:{dw['지지']['십성']['값']} / "
                 f"12운성:{dw['지지']['12운성']} / "
-                f"신살:{'/'.join(dw['지지']['신살']) if dw['지지']['신살'] else '없음'})"
+                f"신살:{'/'.join(dw['지지']['신살']) if dw['지지']['신살'] else '없음'}) "
+                f"← 반드시 이 대운을 기준으로 분석할 것"
             )
             break
 
@@ -812,6 +848,7 @@ def analyze_yearly_fortune(pool, saju_data: dict, seun: dict) -> str:
 ※ 인사말·본인 소개·제목 없이 바로 시작할 것
 ※ 의뢰인 호칭은 반드시 '{full_name} 님'으로만 표기할 것 (성 생략 금지)
 ※ 소제목(###) 없이 파트 구분 없이 흐르는 글 형식으로 작성할 것
+※ 현재 대운은 위에 명시된 대운({current_age}세 구간)이며, 대운 흐름 목록의 다른 나이 대운을 현재 대운으로 혼동하지 말 것
 
 ※ 영어 단어 사용을 금지하고, 반드시 한국어 표현으로 풀어 쓸 것
 ※ 외래어 사용 시에도 한글 표현을 우선하며, 불가피한 경우에도 괄호 속 영어 병기는 금지
@@ -837,7 +874,7 @@ def analyze_personality_basic(pool, saju_data: dict, db: dict) -> str:
 
     stem_info   = db.get("천간", {}).get(day_stem, {})
     branch_info = db.get("지지", {}).get(day_branch, {})
-    origin_ctx  = _build_origin_context(saju_data)
+    origin_ctx  = _build_origin_context(saju_data, _current_year_from_saju(saju_data))
 
     prompt = f"""
 [분석 대상 사주 데이터]
@@ -869,7 +906,7 @@ def analyze_personality_basic(pool, saju_data: dict, db: dict) -> str:
 def analyze_basic_overview(pool, saju_data: dict, target_year: int, db: dict) -> str:
     """기본 리포트용 전반 운세 요약 (재물·직업·연애·건강 각 2~4줄)"""
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, target_year)
 
     prompt = f"""
 [사주 데이터]
@@ -912,7 +949,7 @@ def analyze_basic_thisyear(pool, saju_data: dict, seun: dict) -> str:
     ji_sal    = "/".join(seun["지지"]["신살"]) if seun["지지"]["신살"] else "없음"
 
     full_name  = saju_data['기본정보']['이름']
-    origin_ctx = _build_origin_context(saju_data)
+    origin_ctx = _build_origin_context(saju_data, seun["연도"])
 
     prompt = f"""
 [사주 데이터]
@@ -994,8 +1031,8 @@ def generate_premium_report(api_keys_input, saju_data: dict,
     progress("인간관계·가족운 분석 중...")
     results["relationships"] = analyze_relationships(pool, saju_data, db)
 
-    progress("평생 총운 분석 중...")
-    results["lifetime"] = analyze_lifetime(pool, saju_data, db)
+    progress("인생의 상승기와 저운 분석 중...")
+    results["fortune_peaks"] = analyze_fortune_peaks(pool, saju_data, db)
 
     # ── 월운 루프 ──
     print("\n📆 월운 분석 생성 중...")
