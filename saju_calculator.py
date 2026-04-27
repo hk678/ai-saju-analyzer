@@ -621,7 +621,8 @@ def calculate_saju(name: str,
                    birth_year: int, birth_month: int, birth_day: int,
                    birth_hour: int,
                    gender: str = "남",
-                   birth_minute: int = 0) -> dict:
+                   birth_minute: int = 0,
+                   yajasi: bool = False) -> dict:
     """
     전체 사주 계산.
     세운/월운은 saju_data에 저장하지 않음 — main.py에서 get_seun()/get_wolun()
@@ -636,7 +637,24 @@ def calculate_saju(name: str,
     y_stem, y_branch = get_year_pillar(birth_year)
     m_stem, m_branch = get_month_pillar(birth_year, birth_month, birth_day)
     d_stem, d_branch = get_day_pillar(birth_year, birth_month, birth_day)
-    h_stem, h_branch = get_hour_pillar(d_stem, birth_hour, birth_minute)
+
+    is_yajasi_time = birth_hour * 60 + birth_minute >= 23 * 60 + 30
+
+    if is_yajasi_time:
+        next_day = date(birth_year, birth_month, birth_day) + timedelta(days=1)
+        next_d_stem, next_d_branch = get_day_pillar(next_day.year, next_day.month, next_day.day)
+
+        if yajasi:
+            # 야자시 적용: 일주는 당일 유지, 시주만 다음날 일간으로 계산
+            h_day_stem = next_d_stem
+        else:
+            # 야자시 미적용: 일주 자체를 다음날로 교체, 시주도 다음날 일간 기준
+            d_stem, d_branch = next_d_stem, next_d_branch
+            h_day_stem = next_d_stem
+    else:
+        h_day_stem = d_stem
+
+    h_stem, h_branch = get_hour_pillar(h_day_stem, birth_hour, birth_minute)
     all_stems    = [y_stem, m_stem, d_stem, h_stem]
     all_branches = [y_branch, m_branch, d_branch, h_branch]
 

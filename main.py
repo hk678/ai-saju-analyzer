@@ -27,7 +27,26 @@ def get_user_input() -> dict:
     birth  = input("생년월일 (예: 1990-05-15): ").strip() or "1990-05-15"
     hour   = input("태어난 시각 - 시 (예: 05, 모르면 엔터): ").strip() or "10"
     minute = input("태어난 시각 - 분 (예: 30, 모르면 엔터): ").strip() or "0"
-    gender = input("성별 (남/여): ").strip() or "남"
+
+    # ── 자시(23:30~01:29) 범위일 때 야자시 여부 추가 질문 ──────────────────
+    yajasi = False
+    try:
+        h_check  = int(hour)
+        mi_check = int(minute)
+        total_check = h_check * 60 + mi_check
+        is_jasi = total_check >= 23 * 60 + 30 or total_check < 1 * 60 + 30
+    except ValueError:
+        is_jasi = False
+
+    if is_jasi:
+        print("\n  ⏰ 입력하신 시각이 자시(子時, 23:30~01:29) 범위입니다.")
+        print("     야자시(夜子時) 적용 여부에 따라 일주·시주가 달라집니다.")
+        print("     - 야자시 적용  : 23:30 이후를 다음날로 간주 (현대 명리)")
+        print("     - 야자시 미적용: 자정(00:00) 기준 날짜 전환 (전통 방식)")
+        ya_input = input("  야자시를 적용하시겠습니까? (y: 적용 / 엔터: 미적용): ").strip().lower()
+        yajasi = (ya_input == "y")
+
+    gender = input("\n성별 (남/여): ").strip() or "남"
     rtype_input = input("리포트 유형 (1: 기본, 2: 프리미엄 (기본값 1)): ").strip()
     rtype = "premium" if rtype_input == "2" else "basic"
 
@@ -55,6 +74,7 @@ def get_user_input() -> dict:
         "gender": gender,
         "report_type": rtype,
         "target_year": target_year,
+        "yajasi": yajasi,
     }
 
 
@@ -98,6 +118,7 @@ def run_pipeline(user_info: dict, api_keys_str: str):
         user_info["year"], user_info["month"], user_info["day"],
         user_info["hour"], user_info["gender"],
         user_info.get("minute", 0),
+        user_info.get("yajasi", False),
     )
 
     # 세운 / 월운 계산 후 saju_data에 첨부
