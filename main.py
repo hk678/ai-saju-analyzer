@@ -12,7 +12,11 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from saju_calculator import calculate_saju, get_seun, get_wolun
+from saju_calculator import (
+    calculate_saju, get_seun, get_wolun,
+    recalculate_from_pillars,
+    STEMS, STEMS_KR, BRANCHES, BRANCHES_KR,
+)
 from gemini_analyzer import generate_premium_report, generate_basic_report
 from pdf_generator import generate_pdf
 
@@ -102,6 +106,84 @@ def _attach_seun_wolun(saju_data: dict, target_year: int, seun_years: int = 10) 
     return saju_data
 
 
+def _correct_pillars(saju_data: dict) -> dict:
+    """
+    사주 원국 8글자를 사용자가 직접 수정하고 모든 파생 데이터를 재계산한다.
+
+    천간: 甲갑 乙을 丙병 丁정 戊무 己기 庚경 辛신 壬임 癸계
+    지지: 子자 丑축 寅인 卯묘 辰진 巳사 午오 未미 申신 酉유 戌술 亥해
+    """
+    STEM_DISPLAY   = "  甲갑 乙을 丙병 丁정 戊무 己기 庚경 辛신 壬임 癸계"
+    BRANCH_DISPLAY = "  子자 丑축 寅인 卯묘 辰진 巳사 午오 未미 申신 酉유 戌술 亥해"
+
+    # 독음 → 한자 매핑
+    kr_to_stem   = dict(zip(STEMS_KR,   STEMS))
+    kr_to_branch = dict(zip(BRANCHES_KR, BRANCHES))
+
+    def _pick(label: str, mapping: dict, display: str, current_char: str) -> str:
+        """독음 입력 → 한자 반환. 엔터 입력 시 현재값 유지."""
+        while True:
+            raw = input(f"    {label} [{current_char}] (엔터: 유지)\n"
+                        f"{display}\n    > ").strip().lower()
+            if raw == "":
+                return current_char
+            if raw in mapping:
+                return mapping[raw]
+            print(f"    ⚠️  '{raw}' 을 인식할 수 없습니다. 다시 입력하세요.")
+
+    orig = saju_data["사주원국"]
+    pillar_labels = [("연주", "연"), ("월주", "월"), ("일주", "일"), ("시주", "시")]
+
+    print("\n" + "="*60)
+    print("  📝 사주 원국 수정")
+    print("  수정할 주(柱)를 선택하세요. 여러 개 선택 가능합니다.")
+    print("  예) 1 3  또는  전체  또는  엔터(건너뜀)")
+    print("  1: 연주  2: 월주  3: 일주  4: 시주")
+    print("="*60)
+
+    sel_raw = input("  선택 > ").strip()
+    if sel_raw == "" :
+        print("  수정 없이 계속합니다.")
+        return saju_data
+
+    if "전체" in sel_raw:
+        targets = {1, 2, 3, 4}
+    else:
+        targets = set()
+        for ch in sel_raw.split():
+            if ch.isdigit() and 1 <= int(ch) <= 4:
+                targets.add(int(ch))
+
+    if not targets:
+        print("  선택값이 없습니다. 수정 없이 계속합니다.")
+        return saju_data
+
+    new_pillars = {}
+    for idx, (key, short) in enumerate(pillar_labels, start=1):
+        if idx not in targets:
+            # 수정 대상 아님 → 기존값 그대로
+            new_pillars[key] = (orig[key]["천간"], orig[key]["지지"])
+            continue
+
+        cur_stem   = orig[key]["천간"]
+        cur_branch = orig[key]["지지"]
+        print(f"\n  ── {key} (현재: {cur_stem}{cur_branch}) ──")
+
+        new_stem   = _pick(f"{short}주 천간", kr_to_stem,   STEM_DISPLAY,   cur_stem)
+        new_branch = _pick(f"{short}주 지지", kr_to_branch, BRANCH_DISPLAY, cur_branch)
+        new_pillars[key] = (new_stem, new_branch)
+
+        print(f"  → {key}: {new_stem}{new_branch}")
+
+    return recalculate_from_pillars(
+        existing_data = saju_data,
+        y_stem   = new_pillars["연주"][0], y_branch = new_pillars["연주"][1],
+        m_stem   = new_pillars["월주"][0], m_branch = new_pillars["월주"][1],
+        d_stem   = new_pillars["일주"][0], d_branch = new_pillars["일주"][1],
+        h_stem   = new_pillars["시주"][0], h_branch = new_pillars["시주"][1],
+    )
+
+
 def run_pipeline(user_info: dict, api_keys_str: str):
     """전체 파이프라인 실행"""
 
@@ -146,12 +228,40 @@ def run_pipeline(user_info: dict, api_keys_str: str):
     print("\n" + "-"*60)
     print(f"  📂 {json_path} 를 열어 사주 데이터를 확인하세요.")
     print("-"*60)
-    answer = input("  계속 진행하시겠습니까? (엔터: 계속 / n: 중단): ").strip().lower()
+    answer = input("  계속 진행하시겠습니까? (엔터: 계속 / c: 간지 수정 / n: 중단): ").strip().lower()
     if answer == "n":
         print("\n⛔ 사용자 요청으로 중단되었습니다.")
         print(f"   저장된 JSON: {json_path}")
         print("   이후 단계만 실행하려면 모드 2(PDF 재생성)를 이용하세요.\n")
         return str(out_dir), None
+
+    while answer == "c":
+        saju_data = _correct_pillars(saju_data)
+
+        # 세운/월운을 수정된 간지 기준으로 재계산
+        saju_data = _attach_seun_wolun(saju_data, target_year, seun_years=10)
+
+        # JSON 덮어쓰기
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(saju_data, f, ensure_ascii=False, indent=2)
+
+        print(f"\n  ✅ 수정된 사주 원국: "
+              f"연{saju_data['사주원국']['연주']['간지']} "
+              f"월{saju_data['사주원국']['월주']['간지']} "
+              f"일{saju_data['사주원국']['일주']['간지']} "
+              f"시{saju_data['사주원국']['시주']['간지']}")
+        print(f"  💾 수정된 데이터 저장: {json_path}")
+
+        # 수정 후 재확인 대기
+        print("\n" + "-"*60)
+        print(f"  📂 {json_path} 를 열어 사주 데이터를 확인하세요.")
+        print("-"*60)
+        answer = input("  계속 진행하시겠습니까? (엔터: 계속 / c: 간지 수정 / n: 중단): ").strip().lower()
+        if answer == "n":
+            print("\n⛔ 사용자 요청으로 중단되었습니다.")
+            print(f"   저장된 JSON: {json_path}")
+            print("   이후 단계만 실행하려면 모드 2(PDF 재생성)를 이용하세요.\n")
+            return str(out_dir), None
 
     # ── Step 2: AI 분석 ─────────────────────────────────────────────────────
     print(f"\n🤖 [2/3] AI 분석 생성 중 ({user_info['report_type'].upper()})...")

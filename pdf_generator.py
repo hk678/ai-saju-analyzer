@@ -105,6 +105,21 @@ def _pillar_gan_elem(pillar: dict) -> str:
     return pillar["천간"]["오행"]
 
 
+def _flatten_shinsal(shinsal) -> list:
+    """신살 dict(주별) 또는 list(구버전)를 단일 list로 변환 (중복 제거)"""
+    if isinstance(shinsal, dict):
+        seen, result = set(), []
+        for sals in shinsal.values():
+            for s in sals:
+                if s not in seen:
+                    seen.add(s)
+                    result.append(s)
+        return result if result else ["없음"]
+    elif isinstance(shinsal, list):
+        return shinsal if shinsal else ["없음"]
+    return ["없음"]
+
+
 # ── 신강신약 한자 제거 헬퍼 ───────────────────────────────────────────────────
 def _clean_strength(text: str) -> str:
     return re.sub(r'\([^)]*\)', '', text).strip()
@@ -589,7 +604,7 @@ class SajuPDF(FPDF):
              f"{saju_data['일간정보']['일간']} ({saju_data['일간정보']['오행']} · {saju_data['일간정보'].get('음양', '')})"),
             ('신강/신약', strength_display),
             ('음력 생년월일', saju_data['기본정보'].get('음력', '')),
-            ('신살', ', '.join(saju_data.get('신살', ['없음']))),
+            ('신살', ', '.join(_flatten_shinsal(saju_data.get('신살', {})))),
         ]
         iw, ih = 82, 20
         for idx, (label, val) in enumerate(info_items):
@@ -789,10 +804,11 @@ class SajuPDF(FPDF):
         TABLE_X = (210 - TABLE_W) / 2
         TOP_Y   = self.get_y()
 
-        ROW_H_LABEL  = 12    # 주 라벨 행
-        ROW_H_SS     = 14    # 십성 행
-        ROW_H_HANJA  = 22    # 천간·지지 한자 행
-        ROW_H_I12    = 14    # 12운성 행
+        ROW_H_LABEL  = 11    # 주 라벨 행
+        ROW_H_SS     = 12    # 십성 행
+        ROW_H_HANJA  = 20    # 천간·지지 한자 행
+        ROW_H_I12    = 12    # 12운성 행
+        ROW_H_SAL    = 12    # 신살 행
 
         def _col_x(ci: int) -> float:
             return TABLE_X + LBL_W + GAP + ci * (COL_W + GAP)
@@ -893,7 +909,7 @@ class SajuPDF(FPDF):
             sipsung.get(SS_GAN[p], '일간') if SS_GAN[p] else '일간(나)'
             for p in PILLAR_ORDER
         ]
-        _draw_row(ROW_H_SS, '십성\n(천간)', ss_gan_vals, font_size=15)
+        _draw_row(ROW_H_SS, '십성(천간)', ss_gan_vals, font_size=15)
 
         # 천간 한자 행 — 오행 색상 적용
         gan_vals   = [origin[p]['천간'] for p in PILLAR_ORDER]
@@ -909,11 +925,61 @@ class SajuPDF(FPDF):
 
         # 십성(지지) 행
         ss_ji_vals = [sipsung.get(SS_JI[p], '') for p in PILLAR_ORDER]
-        _draw_row(ROW_H_SS, '십성\n(지지)', ss_ji_vals, font_size=15)
+        _draw_row(ROW_H_SS, '십성(지지)', ss_ji_vals, font_size=15)
 
         # 12운성 행
         i12_vals = [i12.get(I12_KEY[p], '-') for p in PILLAR_ORDER]
         _draw_row(ROW_H_I12, '12운성', i12_vals, font_size=15)
+
+        # 신살 행 — 각 주의 첫 번째 신살만 표시
+        shinsal_dict = saju_data.get('신살', {})
+        # 신살 키 매핑: PILLAR_ORDER 순서 (시주·일주·월주·연주)
+        SAL_KEY = {'시주': '시주', '일주': '일주', '월주': '월주', '연주': '연주'}
+        def _first_sal(pkey: str) -> str:
+            if isinstance(shinsal_dict, dict):
+                sals = shinsal_dict.get(SAL_KEY[pkey], [])
+                return sals[0] if sals else '-'
+            elif isinstance(shinsal_dict, list):
+                return shinsal_dict[0] if shinsal_dict else '-'
+            return '-'
+        sal_vals = [_first_sal(p) for p in PILLAR_ORDER]
+
+        # 신살 텍스트 색상: 살이 있으면 붉은 계열, 없으면 회색
+        sal_colors = [
+            (180, 50, 50) if v != '-' else C_TEXT_LIGHT
+            for v in sal_vals
+        ]
+
+        # _draw_row는 단일 색상을 지원하므로 직접 그림
+        nonlocal_cy_ref = [cy]
+
+        def _draw_sal_row():
+            rh = ROW_H_SAL
+            # 왼쪽 라벨
+            self._fill((235, 237, 243))
+            self._stroke(C_CARD_BORDER)
+            self.set_line_width(0.15)
+            self.rect(TABLE_X, cy, LBL_W, rh, style='FD')
+            self.set_font('KR', '', 13)
+            self._text_color(C_TEXT_MID)
+            self.set_xy(TABLE_X, cy + (rh - 11) / 2)
+            self.cell(LBL_W, 11, '신  살', align='C')
+
+            for ci, (pkey, val) in enumerate(zip(PILLAR_ORDER, sal_vals)):
+                cx2 = _col_x(ci)
+                fill_color = (245, 246, 250) if ci % 2 == 0 else C_WHITE
+                self._fill(fill_color)
+                self._stroke(C_CARD_BORDER)
+                self.set_line_width(0.15)
+                self.rect(cx2, cy, COL_W, rh, style='FD')
+                self.set_line_width(0.2)
+                self.set_font('KR', '', 15)
+                self._text_color(sal_colors[ci])
+                self.set_xy(cx2, cy + (rh - 11) / 2)
+                self.cell(COL_W, 11, val, align='C')
+
+        _draw_sal_row()
+        cy += ROW_H_SAL
 
         # 일주 컬럼 전체 테두리
         day_col_index = 1
@@ -925,7 +991,8 @@ class SajuPDF(FPDF):
             ROW_H_HANJA +
             ROW_H_HANJA +
             ROW_H_SS +
-            ROW_H_I12
+            ROW_H_I12 +
+            ROW_H_SAL
         )
 
         self._stroke(C_GOLD)
@@ -933,7 +1000,7 @@ class SajuPDF(FPDF):
         self.rect(cx, TOP_Y, COL_W, table_height)
         self.set_line_width(0.2)
 
-        self.set_y(cy + 16)
+        self.set_y(cy + 8)
 
         # ── 오행 분포 (세로 나열) ─────────────────────────────────────────
         ELEM_META = [
@@ -962,7 +1029,7 @@ class SajuPDF(FPDF):
         self.cell(0, 9, '오행 분포도', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(8)
 
-        ICON_R   = 8      # 원형 아이콘 반지름
+        ICON_R   = 7      # 원형 아이콘 반지름
         TABLE_X += 6   # 전체 오른쪽 이동
         ICON_D   = ICON_R * 2
         NAME_W   = 16      # 한글명 너비

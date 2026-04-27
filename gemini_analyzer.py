@@ -390,7 +390,22 @@ def _build_origin_context(saju_data: dict, current_year: int = None) -> str:
     ori = saju_data["사주원국"]
     twelve = saju_data.get("십이운성", {})
     sipsung = saju_data.get("십성", {})
-    shinsal_list = saju_data.get("신살", [])
+    shinsal_raw = saju_data.get("신살", {})
+
+    # 신살: dict(주별) 또는 list(구버전) 모두 지원
+    def _shinsal_str(data):
+        if isinstance(data, dict):
+            parts = []
+            for pkey in ["연주", "월주", "일주", "시주"]:
+                sals = data.get(pkey, [])
+                parts.append(f"{pkey}=[{', '.join(sals) if sals else '없음'}]")
+            extra = data.get("원국", [])
+            if extra:
+                parts.append(f"원국추가=[{', '.join(extra)}]")
+            return "  ".join(parts)
+        elif isinstance(data, list):
+            return ', '.join(data) if data else '없음'
+        return '없음'
 
     # 현재 나이 계산 (current_year 전달 시)
     current_age = None
@@ -408,7 +423,7 @@ def _build_origin_context(saju_data: dict, current_year: int = None) -> str:
         f"오행분포: 목{saju_data['오행분포']['목']} 화{saju_data['오행분포']['화']} 토{saju_data['오행분포']['토']} 금{saju_data['오행분포']['금']} 수{saju_data['오행분포']['수']}",
         f"십성: 연간={sipsung.get('연간','-')} 연지={sipsung.get('연지','-')} 월간={sipsung.get('월간','-')} 월지={sipsung.get('월지','-')} 일지={sipsung.get('일지','-')} 시간={sipsung.get('시간','-')} 시지={sipsung.get('시지','-')}",
         f"십이운성: 연지={twelve.get('연지','-')} 월지={twelve.get('월지','-')} 일지={twelve.get('일지','-')} 시지={twelve.get('시지','-')}",
-        f"원국 신살: {', '.join(shinsal_list) if shinsal_list else '없음'}",
+        f"원국 신살(주별): {_shinsal_str(shinsal_raw)}",
         f"대운수: {saju_data.get('대운수', '-')}세 시작",
     ]
 
