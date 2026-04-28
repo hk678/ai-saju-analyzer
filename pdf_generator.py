@@ -284,6 +284,8 @@ class SajuPDF(FPDF):
                     continue
 
                 self.set_font('KR', '', 18)
+                self.set_stretching(95)
+                self.set_char_spacing(-0.3)
                 self._text_color(C_TEXT_DARK)
 
                 if is_bullet:
@@ -300,6 +302,7 @@ class SajuPDF(FPDF):
                 if remaining:
                     _new_content_page_tracked()
                     _just_broke_page[0] = False
+            self.set_char_spacing(0)
 
         for btype, content in blocks:
 
