@@ -1112,7 +1112,9 @@ def analyze_basic_thisyear(pool, saju_data: dict, seun: dict) -> str:
 
 def generate_premium_report(api_keys_input, saju_data: dict,
                             target_year: int = None,
-                            progress_callback=None) -> dict:
+                            progress_callback=None,
+                            progress_save_path: str = None,
+                            skip_keys: set = None) -> dict:
     """
     프리미엄 100페이지 리포트 전체 생성.
     api_keys_input: 콤마 구분 문자열 또는 리스트
@@ -1121,9 +1123,11 @@ def generate_premium_report(api_keys_input, saju_data: dict,
     if target_year is None:
         target_year = datetime.now().year
 
-    pool   = _make_key_pool(api_keys_input)
-    db     = load_db()
+    pool    = _make_key_pool(api_keys_input)
+    db      = load_db()
     results = {}
+    if skip_keys is None:
+        skip_keys = set()
 
     print(f"  🔑 API 키 {len(pool)}개 로드 완료 (라운드 로빈 활성화)")
 
@@ -1133,6 +1137,11 @@ def generate_premium_report(api_keys_input, saju_data: dict,
     total_steps = 8 + len(seun_list) + len(wolun_list)
     step = 0
 
+    def _autosave():
+        if progress_save_path:
+            with open(progress_save_path, "w", encoding="utf-8") as _f:
+                json.dump(results, _f, ensure_ascii=False, indent=2)
+
     def progress(msg):
         nonlocal step
         step += 1
@@ -1141,48 +1150,58 @@ def generate_premium_report(api_keys_input, saju_data: dict,
         else:
             print(f"  [{step}/{total_steps}] {msg}")
 
-    # ── 섹션 1~6: 기본 분석 ──
+    # ── 섹션 1~8: 기본 분석 ──
     print("\n📖 기본 분석 섹션 생성 중...")
 
-    progress("성격/본질 분석 중...")
-    results["personality"] = analyze_personality(pool, saju_data, db)
+    _BASIC_SECTIONS = [
+        ("personality",    "성격/본질 분석 중...",          lambda: analyze_personality(pool, saju_data, db)),
+        ("wealth",         "재물운 분석 중...",              lambda: analyze_wealth(pool, saju_data, db)),
+        ("career",         "직업/직장운 분석 중...",          lambda: analyze_career(pool, saju_data, db)),
+        ("love",           "연애/결혼운 분석 중...",          lambda: analyze_love(pool, saju_data, db)),
+        ("health",         "건강운 분석 중...",              lambda: analyze_health(pool, saju_data, db)),
+        ("lucky_charm",    "개운 가이드 작성 중...",          lambda: analyze_lucky_charm(pool, saju_data, db)),
+        ("relationships",  "인간관계·가족운 분석 중...",      lambda: analyze_relationships(pool, saju_data, db)),
+        ("fortune_peaks",  "인생의 상승기와 저운 분석 중...", lambda: analyze_fortune_peaks(pool, saju_data, db)),
+    ]
 
-    progress("재물운 분석 중...")
-    results["wealth"] = analyze_wealth(pool, saju_data, db)
-
-    progress("직업/직장운 분석 중...")
-    results["career"] = analyze_career(pool, saju_data, db)
-
-    progress("연애/결혼운 분석 중...")
-    results["love"] = analyze_love(pool, saju_data, db)
-
-    progress("건강운 분석 중...")
-    results["health"] = analyze_health(pool, saju_data, db)
-
-    progress("개운 가이드 작성 중...")
-    results["lucky_charm"] = analyze_lucky_charm(pool, saju_data, db)
-
-    progress("인간관계·가족운 분석 중...")
-    results["relationships"] = analyze_relationships(pool, saju_data, db)
-
-    progress("인생의 상승기와 저운 분석 중...")
-    results["fortune_peaks"] = analyze_fortune_peaks(pool, saju_data, db)
+    for key, msg, fn in _BASIC_SECTIONS:
+        progress(msg)
+        if key in skip_keys:
+            print(f"  ⏭  {key} — 이미 완료, 건너뜀")
+            continue
+        results[key] = fn()
+        _autosave()
 
     # ── 월운 루프 ──
     print("\n📆 월운 분석 생성 중...")
-    results["monthly"] = {}
-    for wolun in wolun_list:
-        m = wolun["월"]
-        progress(f"{target_year}년 {m}월 월운 분석 중...")
-        results["monthly"][m] = analyze_monthly_fortune(pool, saju_data, wolun)
+    if "monthly" not in results:
+        results["monthly"] = {}
+    for idx, wolun in enumerate(wolun_list):
+        yr  = wolun["연도"]
+        m   = wolun["월"]
+        ym_str      = f"{yr}-{m:02d}"        # "2026-05" 형식
+        monthly_key = f"monthly.{ym_str}"
+        progress(f"{yr}년 {m}월 월운 분석 중...")
+        if monthly_key in skip_keys:
+            print(f"  ⏭  {yr}년 {m}월 월운 — 이미 완료, 건너뜀")
+            continue
+        results["monthly"][ym_str] = analyze_monthly_fortune(pool, saju_data, wolun)
+        _autosave()
 
     # ── 세운 루프 ──
     print("\n📅 세운(연운) 분석 생성 중...")
-    results["yearly"] = {}
+    if "yearly" not in results:
+        results["yearly"] = {}
     for seun in seun_list:
-        yr = seun["연도"]
+        yr     = seun["연도"]
+        yr_str = str(yr)
         progress(f"{yr}년 세운 분석 중...")
-        results["yearly"][yr] = analyze_yearly_fortune(pool, saju_data, seun)
+        yearly_key = f"yearly.{yr_str}"
+        if yearly_key in skip_keys:
+            print(f"  ⏭  {yr}년 세운 — 이미 완료, 건너뜀")
+            continue
+        results["yearly"][yr_str] = analyze_yearly_fortune(pool, saju_data, seun)
+        _autosave()
 
     return results
 

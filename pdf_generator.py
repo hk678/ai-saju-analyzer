@@ -534,6 +534,7 @@ class SajuPDF(FPDF):
         if auto_number:
             self._section_counter += 1
         self.add_page()
+        self.start_section(f"{self._section_counter}. {section_title}" if auto_number else section_title, level=0)
         self._fill(C_OFFWHITE)
         self.rect(0, 0, 210, 297, style='F')
         self._draw_section_header(section_title, section_num=self._section_counter)
@@ -1249,15 +1250,22 @@ class SajuPDF(FPDF):
     # 8. 월별 운세 — 월별 반드시 새 페이지
     # ══════════════════════════════════════════════════════════════════════════
     def add_monthly_section(self, monthly: dict, target_year: int = None):
-        year_str = f"{target_year}년 " if target_year else "올해 "
         month_names = ['1월','2월','3월','4월','5월','6월',
                     '7월','8월','9월','10월','11월','12월']
 
+        # YYYY-MM 키 기준 정렬
+        def _sort_key(k):
+            parts = k.split('-')
+            return (int(parts[0]), int(parts[1]))
+
         first = True
-        for month_key, content in monthly.items():
-            mn = month_names[int(month_key) - 1]
-            # 첫 월만 번호 증가, 이후 월은 같은 번호 유지
-            self._start_content_page(f'{year_str}{mn} 운세', auto_number=first)
+        for ym_key, content in sorted(monthly.items(), key=lambda x: _sort_key(x[0])):
+            parts = ym_key.split('-')
+            yr  = int(parts[0])
+            mn  = int(parts[1])
+            mn_label = month_names[mn - 1]
+            header_title = f'{yr}년 {mn_label} 운세'
+            self._start_content_page(header_title, auto_number=first)
             first = False
             self._render_markdown(content, x=20, width=170)
             self.ln(4)
@@ -1267,7 +1275,7 @@ class SajuPDF(FPDF):
     # ══════════════════════════════════════════════════════════════════════════
     def add_yearly_section(self, yearly: dict):
         first = True
-        for year_key, content in yearly.items():
+        for year_key, content in sorted(yearly.items(), key=lambda x: int(x[0])):
             # 첫 연도만 번호 증가, 이후 연도는 같은 번호 유지
             self._start_content_page(f'{year_key}년 연간 운세', auto_number=first)
             first = False
@@ -1416,7 +1424,18 @@ def generate_pdf(saju_data: dict, analysis: dict,
             if analysis.get(key):
                 toc_entries.append((title,))
         if analysis.get("monthly"):
-            toc_entries.append((f'{year_str} 월별 운세',))
+            # YYYY-MM 키에서 시작/끝 연월 계산
+            ym_keys = sorted(analysis["monthly"].keys(),
+                             key=lambda k: (int(k.split('-')[0]), int(k.split('-')[1])))
+            first_ym = ym_keys[0]   # "2026-05"
+            last_ym  = ym_keys[-1]  # "2027-04"
+            fy, fm = int(first_ym.split('-')[0]), int(first_ym.split('-')[1])
+            ly, lm = int(last_ym.split('-')[0]),  int(last_ym.split('-')[1])
+            mn_kr = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월']
+            monthly_toc_title = (
+                f'{fy}년 {mn_kr[fm-1]} ~ {ly}년 {mn_kr[lm-1]} 월별 운세'
+            )
+            toc_entries.append((monthly_toc_title,))
         if analysis.get("yearly"):
             toc_entries.append(('향후 10년 연간 운세',))
 
