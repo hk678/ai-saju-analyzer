@@ -1,4 +1,5 @@
 # AI 사주 리포트 자동 생성 시스템
+<img src="https://github.com/user-attachments/assets/a748b1b1-bfed-45c4-b955-c53c763cc71c" width="400" />
 
 > 생년월일·시각을 입력하면 만세력을 자동 계산하고, Gemini AI가 섹션별 분석을 생성하여 PDF 리포트로 출력하는 사주명리 자동화 시스템.
 
